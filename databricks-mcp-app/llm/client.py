@@ -23,9 +23,22 @@ class DatabricksLLMClient:
         # Get Databricks workspace client for auth
         w = WorkspaceClient()
 
+        # Get auth headers (handles various auth methods)
+        # authenticate() returns dict like {'Authorization': 'Bearer ...'}
+        auth_headers = w.config.authenticate()
+        if not auth_headers or 'Authorization' not in auth_headers:
+            raise ValueError(
+                "Unable to get Databricks auth token. "
+                "Please configure authentication."
+            )
+
+        # Extract token from Authorization header (remove 'Bearer ' prefix)
+        auth_header = auth_headers['Authorization']
+        token = auth_header.replace('Bearer ', '')
+
         # Configure OpenAI client with Databricks endpoint
         self.client = OpenAI(
-            api_key=w.config.token,
+            api_key=token,
             base_url=f"{w.config.host}/serving-endpoints"
         )
 
@@ -63,7 +76,7 @@ class DatabricksLLMClient:
 
         if tools:
             kwargs["tools"] = tools
-            # Force tool usage when tools are provided to ensure actions are executed
-            kwargs["tool_choice"] = "required"
+            # Let model decide when to use tools vs respond
+            kwargs["tool_choice"] = "auto"
 
         return self.client.chat.completions.create(**kwargs)

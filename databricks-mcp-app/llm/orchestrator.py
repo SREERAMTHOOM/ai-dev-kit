@@ -4,12 +4,14 @@ LLM Orchestrator
 Coordinates LLM chat with tool execution loop for Databricks resource creation.
 """
 import json
+import os
 from typing import List, Dict, Any, Optional
 from .client import DatabricksLLMClient
+from mcp.client import MCPStdioClient
 
 
 class ToolOrchestrator:
-    """Orchestrates LLM conversation with tool calling for Databricks resources."""
+    """Orchestrates LLM conversation with tool calling."""
 
     def __init__(self, llm_client: DatabricksLLMClient):
         """
@@ -20,19 +22,53 @@ class ToolOrchestrator:
         """
         self.llm = llm_client
         self.tools = None
-        self.handlers = None
+        self.mcp_client: Optional[MCPStdioClient] = None
         self.system_prompt = self._build_system_prompt()
 
         # Lazy load tools to avoid import issues at startup
         self._tools_loaded = False
 
     def _load_tools(self):
-        """Lazy load tools and handlers."""
+        """Lazy load tools from MCP server via stdio."""
         if not self._tools_loaded:
-            from tools.registry import get_all_tool_definitions, get_tool_handlers
-            self.tools = get_all_tool_definitions()
-            self.handlers = get_tool_handlers()
+            # Start MCP server subprocess
+            cmd = os.getenv(
+                "MCP_SERVER_COMMAND",
+                "python -m databricks_mcp_server.stdio_server"
+            ).split()
+            self.mcp_client = MCPStdioClient(cmd)
+            self.mcp_client.start()
+            self.mcp_client.initialize()
+
+            # Get tools in MCP format and convert to OpenAI format
+            mcp_tools = self.mcp_client.list_tools()
+            self.tools = self._convert_mcp_to_openai_format(mcp_tools)
             self._tools_loaded = True
+
+    def _convert_mcp_to_openai_format(
+        self, mcp_tools: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """
+        Convert MCP tool definitions to OpenAI function calling format.
+
+        Args:
+            mcp_tools: List of MCP tool definitions
+
+        Returns:
+            List of OpenAI-formatted tool definitions
+        """
+        openai_tools = []
+        for tool in mcp_tools:
+            openai_tool = {
+                "type": "function",
+                "function": {
+                    "name": tool.get("name", ""),
+                    "description": tool.get("description", ""),
+                    "parameters": tool.get("inputSchema", {})
+                }
+            }
+            openai_tools.append(openai_tool)
+        return openai_tools
 
     def _build_system_prompt(self) -> str:
         """Build system prompt to guide LLM behavior."""
@@ -71,7 +107,8 @@ If a tool fails, report the error and suggest fixes. But ALWAYS attempt to use t
     def process_message(
         self,
         user_message: str,
-        history: Optional[List[Dict[str, Any]]] = None
+        history: Optional[List[Dict[str, Any]]] = None,
+        tool_callback=None
     ) -> Dict[str, Any]:
         """
         Process user message with tool calling loop.
@@ -93,6 +130,9 @@ If a tool fails, report the error and suggest fixes. But ALWAYS attempt to use t
         messages = [{"role": "system", "content": self.system_prompt}]
         messages.extend(history)
         messages.append({"role": "user", "content": user_message})
+
+        # Track tool usage for explainability
+        tools_used = []
 
         # Tool calling loop
         max_iterations = 15
@@ -130,7 +170,27 @@ If a tool fails, report the error and suggest fixes. But ALWAYS attempt to use t
                     # Execute each tool call and add results one by one
                     # Claude requires each tool result to immediately follow
                     for tool_call in choice.message.tool_calls:
-                        print(f"🔧 Executing tool: {tool_call.function.name} with args: {tool_call.function.arguments[:100]}...")
+                        tool_name = tool_call.function.name
+                        print(f"🔧 Executing tool: {tool_name} with args: {tool_call.function.arguments[:100]}...")
+
+                        # Notify callback about tool execution
+                        if tool_callback:
+                            tool_callback({
+                                "type": "tool_start",
+                                "tool": tool_name
+                            })
+
+                        # Track tool usage for explainability
+                        import json as json_lib
+                        try:
+                            args = json_lib.loads(tool_call.function.arguments)
+                        except Exception:
+                            args = {}
+                        tools_used.append({
+                            "name": tool_name,
+                            "arguments": args
+                        })
+
                         result = self._execute_tool(tool_call)
                         print(f"✅ Tool result: {str(result)[:200]}...")
 
@@ -151,7 +211,8 @@ If a tool fails, report the error and suggest fixes. But ALWAYS attempt to use t
                     # LLM has final answer
                     return {
                         "response": choice.message.content,
-                        "history": messages[1:]  # Exclude system prompt
+                        "history": messages[1:],  # Exclude system prompt
+                        "tools_used": tools_used
                     }
 
             except Exception as e:
@@ -159,18 +220,20 @@ If a tool fails, report the error and suggest fixes. But ALWAYS attempt to use t
                 return {
                     "response": f"Error during processing: {str(e)}",
                     "history": messages[1:],
+                    "tools_used": tools_used,
                     "error": True
                 }
 
         # Max iterations reached
         return {
             "response": "I've reached the maximum number of steps for this request. Please try rephrasing or breaking down your request.",
-            "history": messages[1:]
+            "history": messages[1:],
+            "tools_used": tools_used
         }
 
     def _execute_tool(self, tool_call) -> Dict[str, Any]:
         """
-        Execute a single tool call.
+        Execute a single tool call via MCP client.
 
         Args:
             tool_call: OpenAI tool call object
@@ -182,19 +245,17 @@ If a tool fails, report the error and suggest fixes. But ALWAYS attempt to use t
             tool_name = tool_call.function.name
             arguments = json.loads(tool_call.function.arguments)
 
-            # Get handler function
-            if tool_name not in self.handlers:
+            if self.mcp_client is None:
                 return {
                     "success": False,
-                    "error": f"Unknown tool: {tool_name}"
+                    "error": "MCP client not initialized"
                 }
 
-            handler = self.handlers[tool_name]
-
-            # Execute tool (MCP handlers return dict with 'content' key)
-            result = handler(arguments)
+            # Call tool via MCP client
+            result = self.mcp_client.call_tool(tool_name, arguments)
 
             # Extract text content from MCP response format
+            # MCP returns: {"content": [{"type": "text", "text": "..."}]}
             if isinstance(result, dict) and "content" in result:
                 content = result["content"]
                 if isinstance(content, list) and len(content) > 0:

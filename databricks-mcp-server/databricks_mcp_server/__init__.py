@@ -1,7 +1,3 @@
-"""
-Databricks MCP Server
-
-Thin MCP wrapper that exposes databricks-mcp-core functions as MCP tools.
-"""
+"""Databricks MCP Server - FastMCP-based tools for Databricks operations."""
 
 __version__ = "0.1.0"

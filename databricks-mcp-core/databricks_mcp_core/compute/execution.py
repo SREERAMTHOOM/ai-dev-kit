@@ -185,3 +185,66 @@ def execute_databricks_command(
             destroy_context(cluster_id, context_id)
         except Exception:
             pass  # Ignore cleanup errors
+
+
+def run_python_file_on_databricks(
+    cluster_id: str,
+    file_path: str,
+    timeout: int = 600
+) -> ExecutionResult:
+    """
+    Read a local Python file and execute it on a Databricks cluster.
+
+    This is useful for running data generation scripts or other Python code
+    that has been written locally and needs to be executed on Databricks.
+
+    Args:
+        cluster_id: ID of the cluster to run the code on
+        file_path: Local path to the Python file to execute
+        timeout: Maximum time to wait for execution (seconds, default 600)
+
+    Returns:
+        ExecutionResult with output or error
+
+    Raises:
+        FileNotFoundError: If the file doesn't exist
+        DatabricksError: If API request fails
+
+    Example:
+        >>> result = run_python_file_on_databricks(
+        ...     cluster_id="0123-456789-abcde",
+        ...     file_path="/path/to/generate_data.py"
+        ... )
+        >>> if result.success:
+        ...     print(result.output)
+        ... else:
+        ...     print(f"Error: {result.error}")
+    """
+    # Read the file contents
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            code = f.read()
+    except FileNotFoundError:
+        return ExecutionResult(
+            success=False,
+            error=f"File not found: {file_path}"
+        )
+    except Exception as e:
+        return ExecutionResult(
+            success=False,
+            error=f"Failed to read file {file_path}: {str(e)}"
+        )
+
+    if not code.strip():
+        return ExecutionResult(
+            success=False,
+            error=f"File is empty: {file_path}"
+        )
+
+    # Execute the code on Databricks
+    return execute_databricks_command(
+        cluster_id=cluster_id,
+        language="python",
+        code=code,
+        timeout=timeout
+    )

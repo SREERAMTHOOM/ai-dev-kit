@@ -1,1 +1,1 @@
-"""MCP tool definitions"""
+"""Tool modules for Databricks MCP Server."""

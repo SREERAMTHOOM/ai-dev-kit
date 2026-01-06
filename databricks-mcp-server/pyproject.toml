@@ -5,26 +5,23 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "databricks-mcp-server"
 version = "0.1.0"
-description = "MCP server exposing Databricks operations via Model Context Protocol"
+description = "MCP server exposing Databricks operations via FastMCP"
 readme = "README.md"
-requires-python = ">=3.8"
+requires-python = ">=3.9"
 license = {file = "LICENSE.md"}
 authors = [
     {name = "Databricks"},
 ]
 classifiers = [
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.8",
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
 ]
 dependencies = [
     "databricks-mcp-core",
-    "fastapi>=0.104.0",
-    "uvicorn>=0.24.0",
-    "sse-starlette>=1.8.0",
-    "python-dotenv>=1.0.0",
+    "fastmcp>=0.1.0",
 ]
 
 [project.optional-dependencies]
@@ -33,10 +30,6 @@ dev = [
     "black>=23.0.0",
     "ruff>=0.1.0",
 ]
-
-[project.scripts]
-databricks-mcp-server = "databricks_mcp_server.stdio_server:run_stdio_server"
-databricks-mcp-server-http = "databricks_mcp_server.server:app"
 
 [tool.setuptools.packages.find]
 where = ["."]

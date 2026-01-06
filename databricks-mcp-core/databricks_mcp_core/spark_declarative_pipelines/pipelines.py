@@ -2,19 +2,146 @@
 Spark Declarative Pipelines - Pipeline Management
 
 Functions for managing SDP pipeline lifecycle using Databricks Pipelines API.
+All pipelines use Unity Catalog and serverless compute by default.
 """
-from typing import List, Optional, Dict
+import time
+from dataclasses import dataclass, field
+from typing import List, Optional, Dict, Any
+
 from databricks.sdk import WorkspaceClient
 from databricks.sdk.service.pipelines import (
     CreatePipelineResponse,
     GetPipelineResponse,
     PipelineLibrary,
-    NotebookLibrary,
-    PipelineCluster,
+    FileLibrary,
     PipelineEvent,
     GetUpdateResponse,
-    StartUpdateResponse
+    UpdateInfoState,
 )
+
+
+# Terminal states - pipeline update has finished (success or failure)
+TERMINAL_STATES = {
+    UpdateInfoState.COMPLETED,
+    UpdateInfoState.FAILED,
+    UpdateInfoState.CANCELED,
+}
+
+# Running states - pipeline update is in progress
+RUNNING_STATES = {
+    UpdateInfoState.RUNNING,
+    UpdateInfoState.INITIALIZING,
+    UpdateInfoState.SETTING_UP_TABLES,
+    UpdateInfoState.WAITING_FOR_RESOURCES,
+    UpdateInfoState.QUEUED,
+    UpdateInfoState.RESETTING,
+    UpdateInfoState.STOPPING,
+    UpdateInfoState.CREATED,
+}
+
+
+def _build_libraries(workspace_file_paths: List[str]) -> List[PipelineLibrary]:
+    """Build PipelineLibrary list from file paths."""
+    return [
+        PipelineLibrary(file=FileLibrary(path=path))
+        for path in workspace_file_paths
+    ]
+
+
+def _extract_error_details(events: List[PipelineEvent]) -> List[Dict[str, Any]]:
+    """Extract error details from pipeline events for LLM consumption."""
+    errors = []
+    for event in events:
+        if event.error:
+            error_info = {
+                "message": str(event.message) if event.message else None,
+                "level": event.level.value if event.level else None,
+                "timestamp": event.timestamp if event.timestamp else None,
+            }
+            # Extract exception details
+            if event.error.exceptions:
+                exceptions = []
+                for exc in event.error.exceptions:
+                    exc_detail = {
+                        "class_name": exc.class_name if hasattr(exc, 'class_name') else None,
+                        "message": exc.message if hasattr(exc, 'message') else str(exc),
+                    }
+                    exceptions.append(exc_detail)
+                error_info["exceptions"] = exceptions
+            errors.append(error_info)
+    return errors
+
+
+@dataclass
+class PipelineRunResult:
+    """
+    Result from a pipeline operation with detailed status for LLM consumption.
+
+    This dataclass provides comprehensive information about pipeline operations
+    to help LLMs understand what happened and take appropriate action.
+    """
+    # Pipeline identification
+    pipeline_id: str
+    pipeline_name: str
+
+    # Operation details
+    update_id: Optional[str] = None
+    state: Optional[str] = None
+    success: bool = False
+    created: bool = False  # True if pipeline was created, False if updated
+
+    # Configuration (for context)
+    catalog: Optional[str] = None
+    schema: Optional[str] = None
+    root_path: Optional[str] = None
+
+    # Timing
+    duration_seconds: Optional[float] = None
+
+    # Error details (if failed)
+    error_message: Optional[str] = None
+    errors: List[Dict[str, Any]] = field(default_factory=list)
+
+    # Human-readable status
+    message: str = ""
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary for JSON serialization."""
+        return {
+            "pipeline_id": self.pipeline_id,
+            "pipeline_name": self.pipeline_name,
+            "update_id": self.update_id,
+            "state": self.state,
+            "success": self.success,
+            "created": self.created,
+            "catalog": self.catalog,
+            "schema": self.schema,
+            "root_path": self.root_path,
+            "duration_seconds": self.duration_seconds,
+            "error_message": self.error_message,
+            "errors": self.errors,
+            "message": self.message,
+        }
+
+
+def find_pipeline_by_name(name: str) -> Optional[str]:
+    """
+    Find a pipeline by name and return its ID.
+
+    Args:
+        name: Pipeline name to search for (exact match)
+
+    Returns:
+        Pipeline ID if found, None otherwise
+    """
+    w = WorkspaceClient()
+
+    # List pipelines with name filter and find exact match
+    for pipeline in w.pipelines.list_pipelines(filter=f"name LIKE '{name}'"):
+        if pipeline.name == name:
+            return pipeline.pipeline_id
+
+    return None
 
 
 def create_pipeline(
@@ -22,47 +149,35 @@ def create_pipeline(
     root_path: str,
     catalog: str,
     schema: str,
-    workspace_notebook_paths: List[str],
-    serverless: bool = True
+    workspace_file_paths: List[str],
 ) -> CreatePipelineResponse:
     """
-    Create a new Spark Declarative Pipeline.
-
-    Simplified, prescriptive interface with sensible defaults:
-    - Serverless compute by default
-    - Triggered mode (not continuous)
-    - Simple notebook path list (no complex PipelineLibrary objects)
+    Create a new Spark Declarative Pipeline (Unity Catalog, serverless).
 
     Args:
         name: Pipeline name
-        root_path: Root storage location (e.g., "dbfs:/pipelines/my_pipeline")
+        root_path: Root folder for source code (added to Python sys.path for imports)
         catalog: Unity Catalog name
         schema: Schema name for output tables
-        workspace_notebook_paths: List of workspace notebook paths
-                   Example: ["/Workspace/Users/user@example.com/notebook.py"]
-        serverless: Use serverless compute (default: True)
+        workspace_file_paths: List of workspace file paths (raw .sql or .py files)
 
     Returns:
         CreatePipelineResponse with pipeline_id
 
     Raises:
-        DatabricksError: If API request fails
+        DatabricksError: If pipeline already exists or API request fails
     """
     w = WorkspaceClient()
-
-    # Build libraries from simple notebook paths
-    libraries = [
-        PipelineLibrary(notebook=NotebookLibrary(path=path))
-        for path in workspace_notebook_paths
-    ]
+    libraries = _build_libraries(workspace_file_paths)
 
     return w.pipelines.create(
         name=name,
-        storage=root_path,
-        target=f"{catalog}.{schema}",
+        root_path=root_path,
+        catalog=catalog,
+        schema=schema,
         libraries=libraries,
         continuous=False,
-        serverless=serverless
+        serverless=True,
     )
 
 
@@ -75,9 +190,6 @@ def get_pipeline(pipeline_id: str) -> GetPipelineResponse:
 
     Returns:
         GetPipelineResponse with full pipeline configuration and state
-
-    Raises:
-        DatabricksError: If API request fails
     """
     w = WorkspaceClient()
     return w.pipelines.get(pipeline_id=pipeline_id)
@@ -89,44 +201,33 @@ def update_pipeline(
     root_path: Optional[str] = None,
     catalog: Optional[str] = None,
     schema: Optional[str] = None,
-    workspace_notebook_paths: Optional[List[str]] = None,
-    serverless: Optional[bool] = None
+    workspace_file_paths: Optional[List[str]] = None,
 ) -> None:
     """
-    Update pipeline configuration (not code files).
-
-    Simplified interface matching create_pipeline.
+    Update pipeline configuration.
 
     Args:
         pipeline_id: Pipeline ID
         name: New pipeline name
-        root_path: New storage location
+        root_path: New root folder for source code
         catalog: New catalog name
         schema: New schema name
-        workspace_notebook_paths: New list of notebook paths
-        serverless: New serverless setting
-
-    Raises:
-        DatabricksError: If API request fails
+        workspace_file_paths: New list of file paths (raw .sql or .py files)
     """
     w = WorkspaceClient()
 
-    # Build kwargs conditionally
-    kwargs = {"pipeline_id": pipeline_id}
+    kwargs: Dict[str, Any] = {"pipeline_id": pipeline_id}
 
     if name:
         kwargs["name"] = name
     if root_path:
-        kwargs["storage"] = root_path
-    if catalog and schema:
-        kwargs["target"] = f"{catalog}.{schema}"
-    if workspace_notebook_paths:
-        kwargs["libraries"] = [
-            PipelineLibrary(notebook=NotebookLibrary(path=path))
-            for path in workspace_notebook_paths
-        ]
-    if serverless is not None:
-        kwargs["serverless"] = serverless
+        kwargs["root_path"] = root_path
+    if catalog:
+        kwargs["catalog"] = catalog
+    if schema:
+        kwargs["schema"] = schema
+    if workspace_file_paths:
+        kwargs["libraries"] = _build_libraries(workspace_file_paths)
 
     w.pipelines.update(**kwargs)
 
@@ -137,9 +238,6 @@ def delete_pipeline(pipeline_id: str) -> None:
 
     Args:
         pipeline_id: Pipeline ID
-
-    Raises:
-        DatabricksError: If API request fails
     """
     w = WorkspaceClient()
     w.pipelines.delete(pipeline_id=pipeline_id)
@@ -158,16 +256,12 @@ def start_update(
     Args:
         pipeline_id: Pipeline ID
         refresh_selection: List of table names to refresh
-        full_refresh: If True, performs full refresh
+        full_refresh: If True, performs full refresh of all tables
         full_refresh_selection: List of table names for full refresh
-        validate_only: If True, performs dry-run validation
-                      without updating datasets
+        validate_only: If True, performs dry-run validation without updating data
 
     Returns:
         Update ID for polling status
-
-    Raises:
-        DatabricksError: If API request fails
     """
     w = WorkspaceClient()
 
@@ -191,11 +285,7 @@ def get_update(pipeline_id: str, update_id: str) -> GetUpdateResponse:
         update_id: Update ID from start_update
 
     Returns:
-        GetUpdateResponse with update status
-        (state: QUEUED, RUNNING, COMPLETED, FAILED, etc.)
-
-    Raises:
-        DatabricksError: If API request fails
+        GetUpdateResponse with update status (QUEUED, RUNNING, COMPLETED, FAILED, etc.)
     """
     w = WorkspaceClient()
     return w.pipelines.get_update(
@@ -210,12 +300,8 @@ def stop_pipeline(pipeline_id: str) -> None:
 
     Args:
         pipeline_id: Pipeline ID
-
-    Raises:
-        DatabricksError: If API request fails
     """
     w = WorkspaceClient()
-    # SDK's stop() returns Wait object, but we don't need to wait
     w.pipelines.stop(pipeline_id=pipeline_id)
 
 
@@ -226,20 +312,251 @@ def get_pipeline_events(
     """
     Get pipeline events, issues, and error messages.
 
+    Use this to debug pipeline failures.
+
     Args:
         pipeline_id: Pipeline ID
         max_results: Maximum number of events to return
 
     Returns:
         List of PipelineEvent objects with error details
-
-    Raises:
-        DatabricksError: If API request fails
     """
     w = WorkspaceClient()
-    # SDK returns iterator, convert to list with max_results limit
     events = w.pipelines.list_pipeline_events(
         pipeline_id=pipeline_id,
         max_results=max_results
     )
     return list(events)
+
+
+def wait_for_pipeline_update(
+    pipeline_id: str,
+    update_id: str,
+    timeout: int = 1800,
+    poll_interval: int = 5
+) -> Dict[str, Any]:
+    """
+    Wait for a pipeline update to complete and return detailed results.
+
+    Args:
+        pipeline_id: Pipeline ID
+        update_id: Update ID from start_update
+        timeout: Maximum wait time in seconds (default: 30 minutes)
+        poll_interval: Time between status checks in seconds
+
+    Returns:
+        Dictionary with detailed update results:
+        - state: Final state (COMPLETED, FAILED, CANCELED)
+        - success: True if completed successfully
+        - duration_seconds: Total time taken
+        - errors: List of error details if failed
+
+    Raises:
+        TimeoutError: If pipeline doesn't complete within timeout
+    """
+    w = WorkspaceClient()
+    start_time = time.time()
+
+    while True:
+        elapsed = time.time() - start_time
+
+        if elapsed > timeout:
+            raise TimeoutError(
+                f"Pipeline update {update_id} did not complete within {timeout} seconds. "
+                f"Check pipeline status in Databricks UI or call get_update(pipeline_id='{pipeline_id}', update_id='{update_id}')."
+            )
+
+        response = w.pipelines.get_update(
+            pipeline_id=pipeline_id,
+            update_id=update_id
+        )
+
+        update_info = response.update
+        if not update_info:
+            time.sleep(poll_interval)
+            continue
+
+        state = update_info.state
+
+        if state in TERMINAL_STATES:
+            result = {
+                "state": state.value if state else None,
+                "success": state == UpdateInfoState.COMPLETED,
+                "duration_seconds": round(elapsed, 2),
+                "update_id": update_id,
+                "errors": [],
+            }
+
+            # If failed, get detailed error information
+            if state == UpdateInfoState.FAILED:
+                events = get_pipeline_events(pipeline_id, max_results=50)
+                result["errors"] = _extract_error_details(events)
+
+            return result
+
+        time.sleep(poll_interval)
+
+
+def create_or_update_pipeline(
+    name: str,
+    root_path: str,
+    catalog: str,
+    schema: str,
+    workspace_file_paths: List[str],
+    start_run: bool = False,
+    wait_for_completion: bool = False,
+    full_refresh: bool = True,
+    timeout: int = 1800,
+) -> PipelineRunResult:
+    """
+    Create a new pipeline or update an existing one with the same name.
+
+    This is the main entry point for pipeline management. It:
+    1. Searches for an existing pipeline with the same name
+    2. Creates a new pipeline or updates the existing one
+    3. Optionally starts a pipeline run
+    4. Optionally waits for the run to complete
+
+    Uses Unity Catalog and serverless compute.
+
+    Args:
+        name: Pipeline name (used for lookup and creation)
+        root_path: Root folder for source code (added to Python sys.path for imports)
+        catalog: Unity Catalog name for output tables
+        schema: Schema name for output tables
+        workspace_file_paths: List of workspace file paths (raw .sql or .py files)
+        start_run: If True, start a pipeline run after create/update
+        wait_for_completion: If True, wait for the run to complete (requires start_run=True)
+        full_refresh: If True, perform full refresh when starting
+        timeout: Maximum wait time in seconds (default: 30 minutes)
+
+    Returns:
+        PipelineRunResult with detailed status including:
+        - pipeline_id, pipeline_name, catalog, schema, root_path
+        - created: True if newly created, False if updated
+        - success: True if all operations succeeded
+        - state: Final state if run was started (COMPLETED, FAILED, etc.)
+        - duration_seconds: Time taken if waited
+        - error_message: Summary error message if failed
+        - errors: List of detailed errors if failed
+        - message: Human-readable status message
+    """
+    # Step 1: Check if pipeline exists
+    existing_pipeline_id = find_pipeline_by_name(name)
+    created = existing_pipeline_id is None
+
+    # Step 2: Create or update
+    try:
+        if created:
+            response = create_pipeline(
+                name=name,
+                root_path=root_path,
+                catalog=catalog,
+                schema=schema,
+                workspace_file_paths=workspace_file_paths,
+            )
+            pipeline_id = response.pipeline_id
+        else:
+            pipeline_id = existing_pipeline_id
+            update_pipeline(
+                pipeline_id=pipeline_id,
+                name=name,
+                root_path=root_path,
+                catalog=catalog,
+                schema=schema,
+                workspace_file_paths=workspace_file_paths,
+            )
+    except Exception as e:
+        # Return detailed error for LLM consumption
+        return PipelineRunResult(
+            pipeline_id=existing_pipeline_id or "unknown",
+            pipeline_name=name,
+            catalog=catalog,
+            schema=schema,
+            root_path=root_path,
+            success=False,
+            created=False,
+            error_message=str(e),
+            message=f"Failed to {'create' if created else 'update'} pipeline: {e}",
+        )
+
+    # Build result with context
+    result = PipelineRunResult(
+        pipeline_id=pipeline_id,
+        pipeline_name=name,
+        catalog=catalog,
+        schema=schema,
+        root_path=root_path,
+        created=created,
+        success=True,
+        message=f"Pipeline {'created' if created else 'updated'} successfully. "
+                f"Target: {catalog}.{schema}",
+    )
+
+    # Step 3: Start run if requested
+    if start_run:
+        try:
+            update_id = start_update(
+                pipeline_id=pipeline_id,
+                full_refresh=full_refresh,
+            )
+            result.update_id = update_id
+            result.message = (
+                f"Pipeline {'created' if created else 'updated'} and run started. "
+                f"Update ID: {update_id}"
+            )
+        except Exception as e:
+            result.success = False
+            result.error_message = f"Pipeline created but failed to start run: {e}"
+            result.message = result.error_message
+            return result
+
+        # Step 4: Wait for completion if requested
+        if wait_for_completion:
+            try:
+                wait_result = wait_for_pipeline_update(
+                    pipeline_id=pipeline_id,
+                    update_id=update_id,
+                    timeout=timeout,
+                )
+                result.state = wait_result["state"]
+                result.success = wait_result["success"]
+                result.duration_seconds = wait_result["duration_seconds"]
+
+                if result.success:
+                    result.message = (
+                        f"Pipeline {'created' if created else 'updated'} and "
+                        f"completed successfully in {result.duration_seconds}s. "
+                        f"Tables written to {catalog}.{schema}"
+                    )
+                else:
+                    result.errors = wait_result.get("errors", [])
+                    # Build informative error message for LLM
+                    if result.errors:
+                        first_error = result.errors[0]
+                        error_msg = first_error.get("message", "")
+                        if first_error.get("exceptions"):
+                            exc = first_error["exceptions"][0]
+                            error_msg = exc.get("message", error_msg)
+                        result.error_message = error_msg
+                    else:
+                        result.error_message = f"Pipeline failed with state: {result.state}"
+
+                    result.message = (
+                        f"Pipeline {'created' if created else 'updated'} but run failed. "
+                        f"State: {result.state}. "
+                        f"Error: {result.error_message}. "
+                        f"Use get_pipeline_events(pipeline_id='{pipeline_id}') for full details."
+                    )
+
+            except TimeoutError as e:
+                result.success = False
+                result.state = "TIMEOUT"
+                result.error_message = str(e)
+                result.message = (
+                    f"Pipeline run timed out after {timeout}s. "
+                    f"The pipeline may still be running. "
+                    f"Check status with get_update(pipeline_id='{pipeline_id}', update_id='{update_id}')"
+                )
+
+    return result

@@ -8,12 +8,18 @@ import os
 import uuid
 from typing import Dict, List, Optional
 from datetime import datetime
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+import asyncio
+import json as json_module
 
 from llm.client import DatabricksLLMClient
 from llm.orchestrator import ToolOrchestrator
@@ -38,6 +44,9 @@ app.add_middleware(
 # In-memory session store (use Redis/DB for production)
 sessions: Dict[str, Dict] = {}
 
+# Tool execution event queues for SSE streaming
+tool_events: Dict[str, asyncio.Queue] = {}
+
 
 # Request/Response Models
 class ChatRequest(BaseModel):
@@ -50,6 +59,7 @@ class ChatResponse(BaseModel):
     session_id: str
     timestamp: str
     error: bool = False
+    tools_used: List[Dict] = []
 
 
 class SessionInfo(BaseModel):
@@ -77,6 +87,44 @@ async def startup_event():
 
 
 # API Endpoints
+
+@app.get("/api/chat/stream/{session_id}")
+async def chat_stream(session_id: str):
+    """Stream tool execution events via Server-Sent Events."""
+    async def event_generator():
+        # Create queue for this session if it doesn't exist
+        if session_id not in tool_events:
+            tool_events[session_id] = asyncio.Queue()
+
+        queue = tool_events[session_id]
+
+        try:
+            while True:
+                # Wait for events with timeout
+                try:
+                    event = await asyncio.wait_for(queue.get(), timeout=30.0)
+                    yield f"data: {json_module.dumps(event)}\n\n"
+
+                    # If this is a 'done' event, stop streaming
+                    if event.get('type') == 'done':
+                        break
+                except asyncio.TimeoutError:
+                    # Send keepalive
+                    yield f": keepalive\n\n"
+        finally:
+            # Clean up queue
+            if session_id in tool_events:
+                del tool_events[session_id]
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no"
+        }
+    )
+
 
 @app.post("/api/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest):
@@ -106,11 +154,33 @@ async def chat(request: ChatRequest):
 
         session = sessions[session_id]
 
+        # Create event queue for this session
+        if session_id not in tool_events:
+            tool_events[session_id] = asyncio.Queue()
+
+        # Emit start event
+        await tool_events[session_id].put({
+            "type": "start",
+            "status": "Processing request..."
+        })
+
+        # Define callback for tool execution events
+        def tool_callback(event):
+            # Put event in queue (non-async, called from sync code)
+            asyncio.create_task(tool_events[session_id].put(event))
+
         # Process message with orchestrator
         result = orchestrator.process_message(
             request.message,
-            session["history"]
+            session["history"],
+            tool_callback=tool_callback
         )
+
+        # Emit done event
+        await tool_events[session_id].put({
+            "type": "done",
+            "tools_used": result.get("tools_used", [])
+        })
 
         # Update session
         session["history"] = result["history"]
@@ -120,7 +190,8 @@ async def chat(request: ChatRequest):
             response=result["response"],
             session_id=session_id,
             timestamp=datetime.utcnow().isoformat(),
-            error=result.get("error", False)
+            error=result.get("error", False),
+            tools_used=result.get("tools_used", [])
         )
 
     except Exception as e:
@@ -193,6 +264,7 @@ async def list_tools():
         unity_catalog = []
         pipelines = []
         synthetic_data = []
+        compute = []
 
         for tool in orchestrator.tools:
             name = tool["function"]["name"]
@@ -200,30 +272,40 @@ async def list_tools():
 
             if any(x in name for x in ["catalog", "schema", "table"]):
                 unity_catalog.append({"name": name, "description": desc})
-            elif any(x in name for x in ["pipeline", "file", "directory", "path"]):
+            elif any(x in name for x in ["pipeline", "sdp", "file", "directory"]):
                 pipelines.append({"name": name, "description": desc})
             elif "synth" in name:
                 synthetic_data.append({"name": name, "description": desc})
+            elif any(x in name for x in ["context", "command", "execute"]):
+                compute.append({"name": name, "description": desc})
 
-        return {
-            "toolCategories": [
-                {
-                    "category": "Unity Catalog",
-                    "description": "Create and manage catalogs, schemas, and tables",
-                    "tools": unity_catalog
-                },
-                {
-                    "category": "Spark Declarative Pipelines",
-                    "description": "Create and manage data pipelines and workspace files",
-                    "tools": pipelines
-                },
-                {
-                    "category": "Synthetic Data Generation",
-                    "description": "Generate and upload test data",
-                    "tools": synthetic_data
-                }
-            ]
-        }
+        categories = []
+        if unity_catalog:
+            categories.append({
+                "category": "Unity Catalog",
+                "description": "Create and manage catalogs, schemas, and tables",
+                "tools": unity_catalog
+            })
+        if pipelines:
+            categories.append({
+                "category": "Spark Declarative Pipelines",
+                "description": "Create and manage data pipelines",
+                "tools": pipelines
+            })
+        if synthetic_data:
+            categories.append({
+                "category": "Synthetic Data Generation",
+                "description": "Generate and upload test data",
+                "tools": synthetic_data
+            })
+        if compute:
+            categories.append({
+                "category": "Compute Operations",
+                "description": "Execute code and manage compute contexts",
+                "tools": compute
+            })
+
+        return {"toolCategories": categories}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
