@@ -53,6 +53,8 @@ class InvokeAgentRequest(BaseModel):
   cluster_id: Optional[str] = None  # Databricks cluster for code execution
   default_catalog: Optional[str] = None  # Default Unity Catalog
   default_schema: Optional[str] = None  # Default schema
+  warehouse_id: Optional[str] = None  # Databricks SQL warehouse for queries
+  workspace_folder: Optional[str] = None  # Workspace folder for file uploads
 
 
 @router.post('/invoke_agent')
@@ -130,6 +132,8 @@ async def invoke_agent(request: Request, body: InvokeAgentRequest):
         cluster_id=body.cluster_id,
         default_catalog=body.default_catalog,
         default_schema=body.default_schema,
+        warehouse_id=body.warehouse_id,
+        workspace_folder=body.workspace_folder,
         databricks_host=workspace_url,
         databricks_token=user_token,
       ):
@@ -230,6 +234,14 @@ async def invoke_agent(request: Request, body: InvokeAgentRequest):
         await conv_storage.update_catalog_schema(
           conversation_id, body.default_catalog, body.default_schema
         )
+
+      # Update warehouse_id if provided
+      if body.warehouse_id:
+        await conv_storage.update_warehouse_id(conversation_id, body.warehouse_id)
+
+      # Update workspace_folder if provided
+      if body.workspace_folder:
+        await conv_storage.update_workspace_folder(conversation_id, body.workspace_folder)
 
       logger.info(
         f'Saved messages to conversation {conversation_id}: '

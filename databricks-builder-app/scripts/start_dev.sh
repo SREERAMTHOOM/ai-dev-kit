@@ -45,6 +45,13 @@ sleep 2
 # Start frontend
 echo "Starting frontend on http://localhost:3000..."
 cd client
+
+# Check if node_modules exists, install if not
+if [ ! -d "node_modules" ]; then
+  echo "Installing frontend dependencies..."
+  npm install
+fi
+
 npm run dev &
 FRONTEND_PID=$!
 cd ..

@@ -76,6 +76,12 @@ class Conversation(Base):
   default_catalog: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
   default_schema: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
 
+  # Databricks SQL warehouse ID for SQL queries
+  warehouse_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+
+  # Workspace folder for uploading files (e.g., /Workspace/Users/email/project)
+  workspace_folder: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+
   # Relationships
   project: Mapped['Project'] = relationship('Project', back_populates='conversations')
   messages: Mapped[List['Message']] = relationship(
@@ -95,6 +101,8 @@ class Conversation(Base):
       'cluster_id': self.cluster_id,
       'default_catalog': self.default_catalog,
       'default_schema': self.default_schema,
+      'warehouse_id': self.warehouse_id,
+      'workspace_folder': self.workspace_folder,
       'messages': [m.to_dict() for m in self.messages] if self.messages else [],
     }
 
@@ -108,6 +116,8 @@ class Conversation(Base):
       'cluster_id': self.cluster_id,
       'default_catalog': self.default_catalog,
       'default_schema': self.default_schema,
+      'warehouse_id': self.warehouse_id,
+      'workspace_folder': self.workspace_folder,
       'message_count': len(self.messages) if self.messages else 0,
     }
 

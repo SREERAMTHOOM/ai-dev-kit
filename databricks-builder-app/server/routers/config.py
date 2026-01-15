@@ -1,10 +1,12 @@
 """Configuration and user info endpoints."""
 
 import logging
+from typing import Optional
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Query, Request
 
 from ..db import get_lakebase_project_id, is_postgres_configured, test_database_connection
+from ..services.system_prompt import get_system_prompt
 from ..services.user import get_current_user, get_workspace_url
 
 logger = logging.getLogger(__name__)
@@ -37,3 +39,22 @@ async def get_user_info(request: Request):
 async def health_check():
   """Health check endpoint."""
   return {'status': 'healthy'}
+
+
+@router.get('/system_prompt')
+async def get_system_prompt_endpoint(
+  cluster_id: Optional[str] = Query(None),
+  warehouse_id: Optional[str] = Query(None),
+  default_catalog: Optional[str] = Query(None),
+  default_schema: Optional[str] = Query(None),
+  workspace_folder: Optional[str] = Query(None),
+):
+  """Get the system prompt with current configuration."""
+  prompt = get_system_prompt(
+    cluster_id=cluster_id,
+    default_catalog=default_catalog,
+    default_schema=default_schema,
+    warehouse_id=warehouse_id,
+    workspace_folder=workspace_folder,
+  )
+  return {'system_prompt': prompt}

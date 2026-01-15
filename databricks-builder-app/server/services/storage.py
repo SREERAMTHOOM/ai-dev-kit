@@ -223,6 +223,42 @@ class ConversationStorage:
         return True
       return False
 
+  async def update_warehouse_id(self, conversation_id: str, warehouse_id: str | None) -> bool:
+    """Update Databricks SQL warehouse ID for SQL queries."""
+    async with session_scope() as session:
+      result = await session.execute(
+        select(Conversation)
+        .join(Project, Conversation.project_id == Project.id)
+        .where(
+          Conversation.id == conversation_id,
+          Conversation.project_id == self.project_id,
+          Project.user_email == self.user_email,
+        )
+      )
+      conversation = result.scalar_one_or_none()
+      if conversation:
+        conversation.warehouse_id = warehouse_id
+        return True
+      return False
+
+  async def update_workspace_folder(self, conversation_id: str, workspace_folder: str | None) -> bool:
+    """Update workspace folder for uploading files."""
+    async with session_scope() as session:
+      result = await session.execute(
+        select(Conversation)
+        .join(Project, Conversation.project_id == Project.id)
+        .where(
+          Conversation.id == conversation_id,
+          Conversation.project_id == self.project_id,
+          Project.user_email == self.user_email,
+        )
+      )
+      conversation = result.scalar_one_or_none()
+      if conversation:
+        conversation.workspace_folder = workspace_folder
+        return True
+      return False
+
   async def delete(self, conversation_id: str) -> bool:
     """Delete a conversation and all its messages."""
     async with session_scope() as session:

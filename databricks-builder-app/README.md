@@ -263,7 +263,7 @@ PROJECTS_BASE_DIR=./projects
 ENV=development
 
 # Skills to load (comma-separated)
-ENABLED_SKILLS=databricks-python-sdk,spark-declarative-pipelines,synthetic-data-generation
+ENABLED_SKILLS=spark-declarative-pipelines,synthetic-data-generation
 ```
 
 **Getting your Databricks token:**

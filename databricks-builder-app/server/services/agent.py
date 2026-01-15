@@ -167,6 +167,8 @@ async def stream_agent_response(
   cluster_id: str | None = None,
   default_catalog: str | None = None,
   default_schema: str | None = None,
+  warehouse_id: str | None = None,
+  workspace_folder: str | None = None,
   databricks_host: str | None = None,
   databricks_token: str | None = None,
 ) -> AsyncIterator[dict]:
@@ -180,6 +182,10 @@ async def stream_agent_response(
       message: User message to send
       session_id: Optional session ID for resuming conversations
       cluster_id: Optional Databricks cluster ID for code execution
+      default_catalog: Optional default Unity Catalog name
+      default_schema: Optional default schema name
+      warehouse_id: Optional Databricks SQL warehouse ID for queries
+      workspace_folder: Optional workspace folder for file uploads
       databricks_host: Databricks workspace URL for auth context
       databricks_token: User's Databricks access token for auth context
 
@@ -205,11 +211,13 @@ async def stream_agent_response(
     allowed_tools.extend(databricks_tool_names)
     logger.info(f'Databricks MCP server configured with {len(databricks_tool_names)} tools')
 
-    # Generate system prompt with available skills, cluster, and catalog/schema context
+    # Generate system prompt with available skills, cluster, warehouse, and catalog/schema context
     system_prompt = get_system_prompt(
       cluster_id=cluster_id,
       default_catalog=default_catalog,
       default_schema=default_schema,
+      warehouse_id=warehouse_id,
+      workspace_folder=workspace_folder,
     )
 
     # Load Claude settings for Databricks model serving authentication
