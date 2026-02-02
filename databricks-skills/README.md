@@ -23,6 +23,7 @@ cp -r ai-dev-kit/databricks-skills/agent-bricks .claude/skills/
 ### 🤖 AI & Agents
 - **agent-bricks** - Knowledge Assistants, Genie Spaces, Multi-Agent Supervisors
 - **mlflow-evaluation** - Model evaluation, scoring, trace analysis
+- **model-serving** - Deploy MLflow models and AI agents to endpoints
 - **unstructured-pdf-generation** - Generate synthetic PDFs for RAG
 
 ### 📊 Analytics & Dashboards

@@ -25,6 +25,7 @@ Vibecoding on Databricks just got a whole lot better. The **AI Dev Kit** gives y
 - **Genie Spaces** (natural language data exploration)
 - **Knowledge Assistants** (RAG-based document Q&A)
 - **MLflow Experiments** (evaluation, scoring, traces)
+- **Model Serving** (deploy ML models and AI agents to endpoints)
 - **Databricks Apps** (full-stack web applications)
 - ...and more
 
@@ -87,7 +88,7 @@ cd ai-dev-kit
 ./databricks-skills/install_skills.sh
 ```
 
-Skills include: Spark Declarative Pipelines, Asset Bundles, MLflow Evaluation, Synthetic Data Generation, and [more](databricks-skills/).
+Skills include: Spark Declarative Pipelines, Asset Bundles, MLflow Evaluation, Model Serving, Synthetic Data Generation, and [more](databricks-skills/).
 
 ### MCP Tools Only
 
@@ -124,7 +125,7 @@ Works with LangChain, OpenAI Agents SDK, or any Python framework. See [databrick
 |-----------|-------------|
 | [`databricks-tools-core/`](databricks-tools-core/) | Python library with high-level Databricks functions |
 | [`databricks-mcp-server/`](databricks-mcp-server/) | MCP server exposing 50+ tools for AI assistants |
-| [`databricks-skills/`](databricks-skills/) | 14 markdown skills teaching Databricks patterns |
+| [`databricks-skills/`](databricks-skills/) | 15 markdown skills teaching Databricks patterns |
 | [`databricks-builder-app/`](databricks-builder-app/) | Full-stack web app with Claude Code integration |
 | [`ai-dev-project/`](ai-dev-project/) | Starter template for new projects |
 
