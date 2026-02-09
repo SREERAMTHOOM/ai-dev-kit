@@ -414,6 +414,58 @@ for doc in results.result.data_array:
     print(doc)
 ```
 
+### ABAC Policies
+**Doc:** https://docs.databricks.com/data-governance/unity-catalog/abac/policies
+
+```python
+# List policies on a schema
+for policy in w.policies.list_policies(
+    on_securable_type="SCHEMA",
+    on_securable_fullname="my_catalog.my_schema",
+    include_inherited=True,
+):
+    print(f"{policy.name}: {policy.policy_type}")
+
+# Get policy details
+policy = w.policies.get_policy(
+    name="mask_pii_ssn",
+    on_securable_type="SCHEMA",
+    on_securable_fullname="my_catalog.my_schema",
+)
+
+# Create column mask policy (ALWAYS include gov_admin in except_principals)
+from databricks.sdk.service.catalog import ColumnMask, MatchColumns
+created = w.policies.create_policy(
+    name="mask_pii_ssn",
+    policy_type="COLUMN_MASK",
+    on_securable_type="SCHEMA",
+    on_securable_fullname="my_catalog.my_schema",
+    for_securable_type="TABLE",
+    to_principals=["analysts"],
+    except_principals=["gov_admin"],
+    column_mask=ColumnMask(function_name="my_catalog.my_schema.mask_ssn"),
+    match_columns=[MatchColumns(tag_name="pii_type", tag_value="ssn")],
+)
+
+# Update policy principals
+w.policies.update_policy(
+    name="mask_pii_ssn",
+    on_securable_type="SCHEMA",
+    on_securable_fullname="my_catalog.my_schema",
+    to_principals=["analysts", "new_team"],
+    except_principals=["gov_admin"],
+)
+
+# Delete policy
+w.policies.delete_policy(
+    name="mask_pii_ssn",
+    on_securable_type="SCHEMA",
+    on_securable_fullname="my_catalog.my_schema",
+)
+```
+
+**Note:** There is no `SHOW POLICIES` SQL. Use `w.policies.list_policies()` instead. There is no `ALTER POLICY` — drop and recreate.
+
 ### Pipelines (Delta Live Tables)
 **Doc:** https://databricks-sdk-py.readthedocs.io/en/latest/workspace/pipelines/pipelines.html
 
