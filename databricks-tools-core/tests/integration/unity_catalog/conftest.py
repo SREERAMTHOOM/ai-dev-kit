@@ -230,3 +230,67 @@ def cleanup_functions():
             delete_function(fn_name, force=True)
         except Exception as e:
             logger.warning(f"Failed to cleanup function {fn_name}: {e}")
+
+
+@pytest.fixture(scope="function")
+def cleanup_policies():
+    """
+    Track and cleanup ABAC policies created during tests.
+
+    Usage:
+        def test_create_policy(cleanup_policies):
+            create_abac_policy(...)
+            cleanup_policies((policy_name, securable_type, securable_fullname))
+    """
+    from databricks_tools_core.unity_catalog import delete_abac_policy
+
+    policies_to_cleanup = []
+
+    def register(policy_tuple: tuple):
+        """Register a policy for cleanup. Tuple: (name, securable_type, securable_fullname)."""
+        if policy_tuple not in policies_to_cleanup:
+            policies_to_cleanup.append(policy_tuple)
+            logger.info(f"Registered policy for cleanup: {policy_tuple[0]}")
+
+    yield register
+
+    for name, stype, sfullname in policies_to_cleanup:
+        try:
+            logger.info(f"Cleaning up policy: {name}")
+            delete_abac_policy(
+                policy_name=name,
+                securable_type=stype,
+                securable_fullname=sfullname,
+            )
+        except Exception as e:
+            logger.warning(f"Failed to cleanup policy {name}: {e}")
+
+
+@pytest.fixture(scope="function")
+def cleanup_governed_tags():
+    """
+    Track and cleanup governed tags (tag policies) created during tests.
+
+    Uses the Tag Policies API (w.tag_policies) to delete governed tags.
+
+    Usage:
+        def test_create_tag(cleanup_governed_tags):
+            w.tag_policies.create_tag_policy(...)
+            cleanup_governed_tags("my_tag_key")
+    """
+    tags_to_cleanup = []
+
+    def register(tag_key: str):
+        if tag_key not in tags_to_cleanup:
+            tags_to_cleanup.append(tag_key)
+            logger.info(f"Registered governed tag for cleanup: {tag_key}")
+
+    yield register
+
+    w = get_workspace_client()
+    for tag_key in tags_to_cleanup:
+        try:
+            logger.info(f"Cleaning up governed tag: {tag_key}")
+            w.tag_policies.delete_tag_policy(tag_key=tag_key)
+        except Exception as e:
+            logger.warning(f"Failed to cleanup governed tag {tag_key}: {e}")

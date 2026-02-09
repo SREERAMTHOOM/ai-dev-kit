@@ -1,6 +1,10 @@
 # MCP Tools Reference for ABAC Policy Management
 
-Reference for the 12 MCP tools that manage ABAC policies via the Databricks Python SDK. These tools are registered in the UCABAC MCP server.
+Reference for the MCP tools that manage ABAC policies. Core policy operations are implemented in
+`databricks_tools_core.unity_catalog.abac_policies`. Discovery helpers delegate to existing
+`unity_catalog` modules where possible.
+
+**Implementation:** `databricks-tools-core/databricks_tools_core/unity_catalog/abac_policies.py`
 
 ---
 
@@ -10,7 +14,11 @@ Reference for the 12 MCP tools that manage ABAC policies via the Databricks Pyth
 
 List ABAC policies on a catalog, schema, or table.
 
+**Implementation:** `unity_catalog.abac_policies.list_abac_policies`
+
 ```python
+from databricks_tools_core.unity_catalog import list_abac_policies
+
 list_abac_policies(
     securable_type: str,       # "CATALOG", "SCHEMA", or "TABLE"
     securable_fullname: str,   # e.g., "my_catalog.my_schema"
@@ -44,7 +52,11 @@ list_abac_policies(
 
 Get details for a specific policy by name.
 
+**Implementation:** `unity_catalog.abac_policies.get_abac_policy`
+
 ```python
+from databricks_tools_core.unity_catalog import get_abac_policy
+
 get_abac_policy(
     policy_name: str,          # Policy name
     securable_type: str,       # "CATALOG", "SCHEMA", or "TABLE"
@@ -79,7 +91,11 @@ get_abac_policy(
 
 Get column masks and row filters for a specific table via Unity Catalog API.
 
+**Implementation:** `unity_catalog.abac_policies.get_table_policies`
+
 ```python
+from databricks_tools_core.unity_catalog import get_table_policies
+
 get_table_policies(
     catalog: str,
     schema: str,
@@ -112,7 +128,11 @@ get_table_policies(
 
 List masking UDFs in a schema.
 
+**Implementation:** `unity_catalog.abac_policies.get_masking_functions`
+
 ```python
+from databricks_tools_core.unity_catalog import get_masking_functions
+
 get_masking_functions(
     catalog: str,
     schema: str,
@@ -125,6 +145,7 @@ get_masking_functions(
   "success": true,
   "catalog": "my_catalog",
   "schema": "my_schema",
+  "function_count": 3,
   "functions": [
     {
       "name": "mask_ssn",
@@ -141,10 +162,14 @@ get_masking_functions(
 
 Get schema metadata via Unity Catalog API.
 
+**Implementation:** Delegates to existing `unity_catalog.schemas.get_schema`
+
 ```python
-get_schema_info(
-    catalog: str,
-    schema: str,
+from databricks_tools_core.unity_catalog import get_schema
+
+get_schema(
+    catalog_name: str,
+    schema_name: str,
 )
 ```
 
@@ -152,9 +177,13 @@ get_schema_info(
 
 Get catalog metadata via Unity Catalog API.
 
+**Implementation:** Delegates to existing `unity_catalog.catalogs.get_catalog`
+
 ```python
-get_catalog_info(
-    catalog: str,
+from databricks_tools_core.unity_catalog import get_catalog
+
+get_catalog(
+    catalog_name: str,
 )
 ```
 
@@ -162,11 +191,17 @@ get_catalog_info(
 
 Get column-level tags via the Tags API.
 
+**Implementation:** Delegates to existing `unity_catalog.tags.query_column_tags`
+
 ```python
-get_column_tags_api(
-    catalog: str,
-    schema: str,
-    table: str,
+from databricks_tools_core.unity_catalog import query_column_tags
+
+query_column_tags(
+    catalog_filter: str,    # Filter by catalog name
+    table_name: str = None, # Filter by table name
+    tag_name: str = None,   # Filter by tag name
+    tag_value: str = None,  # Filter by tag value
+    limit: int = 100,
 )
 ```
 
@@ -174,12 +209,49 @@ get_column_tags_api(
 
 List all tables in a schema with their column masks and row filters.
 
+**Implementation:** Compose `unity_catalog.tables.list_tables` + `unity_catalog.abac_policies.get_table_policies`
+
 ```python
-list_table_policies_in_schema(
-    catalog: str,
-    schema: str,
+from databricks_tools_core.unity_catalog import list_tables, get_table_policies
+
+# List all tables, then get policies for each
+tables = list_tables(catalog_name=catalog, schema_name=schema)
+for t in tables["tables"]:
+    policies = get_table_policies(catalog=catalog, schema=schema, table=t["name"])
+```
+
+---
+
+## Quota Check
+
+### `check_policy_quota`
+
+Check if the policy quota allows creating a new policy on a securable.
+
+**Implementation:** `unity_catalog.abac_policies.check_policy_quota`
+
+```python
+from databricks_tools_core.unity_catalog import check_policy_quota
+
+check_policy_quota(
+    securable_type: str,       # "CATALOG", "SCHEMA", or "TABLE"
+    securable_fullname: str,   # Fully qualified securable name
 )
 ```
+
+**Returns:**
+```json
+{
+  "success": true,
+  "securable_type": "SCHEMA",
+  "securable_fullname": "my_catalog.my_schema",
+  "current": 3,
+  "max": 10,
+  "can_create": true
+}
+```
+
+Policy quotas: CATALOG=10, SCHEMA=10, TABLE=5.
 
 ---
 
@@ -189,7 +261,11 @@ list_table_policies_in_schema(
 
 Preview policy changes without executing. This is the critical human-in-the-loop gate.
 
+**Implementation:** `unity_catalog.abac_policies.preview_policy_changes`
+
 ```python
+from databricks_tools_core.unity_catalog import preview_policy_changes
+
 preview_policy_changes(
     action: str,               # "CREATE", "UPDATE", or "DELETE"
     policy_name: str,
@@ -241,7 +317,11 @@ preview_policy_changes(
 
 Create a new ABAC policy (COLUMN_MASK or ROW_FILTER).
 
+**Implementation:** `unity_catalog.abac_policies.create_abac_policy`
+
 ```python
+from databricks_tools_core.unity_catalog import create_abac_policy
+
 create_abac_policy(
     policy_name: str,
     policy_type: str,          # "COLUMN_MASK" or "ROW_FILTER"
@@ -251,7 +331,7 @@ create_abac_policy(
     to_principals: list,       # Users/groups the policy applies to
     tag_name: str,             # Tag key to match
     tag_value: str = None,     # Tag value (optional, uses hasTag vs hasTagValue)
-    except_principals: list = None,  # Excluded principals (gov_admin auto-added)
+    except_principals: list = None,  # Excluded principals
     comment: str = "",
 )
 ```
@@ -267,18 +347,24 @@ create_abac_policy(
     "on_securable": "SCHEMA my_catalog.my_schema",
     "function": "my_catalog.my_schema.mask_ssn",
     "to_principals": ["analysts"],
-    "except_principals": ["gov_admin"]
-  }
+    "except_principals": ["gov_admin"],
+    "tag_match": "pii_type=ssn"
+  },
+  "policy": { ... }
 }
 ```
 
-> **Note:** `gov_admin` is automatically added to `except_principals` if not already present.
+> **Note:** Callers should include appropriate admin groups in `except_principals` to protect administrator access.
 
 ### `update_abac_policy`
 
 Update an existing policy's principals or comment.
 
+**Implementation:** `unity_catalog.abac_policies.update_abac_policy`
+
 ```python
+from databricks_tools_core.unity_catalog import update_abac_policy
+
 update_abac_policy(
     policy_name: str,
     securable_type: str,
@@ -298,7 +384,8 @@ update_abac_policy(
   "changes": {
     "to_principals": ["analysts", "data_scientists", "new_team"],
     "comment": "Updated: added new_team"
-  }
+  },
+  "policy": { ... }
 }
 ```
 
@@ -308,7 +395,11 @@ update_abac_policy(
 
 Delete an ABAC policy.
 
+**Implementation:** `unity_catalog.abac_policies.delete_abac_policy`
+
 ```python
+from databricks_tools_core.unity_catalog import delete_abac_policy
+
 delete_abac_policy(
     policy_name: str,
     securable_type: str,
@@ -329,57 +420,64 @@ delete_abac_policy(
 
 ## Human-in-the-Loop Workflow Example
 
-Complete workflow using MCP tools:
+Complete workflow using the implemented functions:
 
-```
-Step 1: ANALYZE
-─────────────────────────────────
-→ list_abac_policies(securable_type="SCHEMA", securable_fullname="prod.finance")
-→ get_column_tags_api(catalog="prod", schema="finance", table="customers")
-→ get_masking_functions(catalog="prod", schema="finance")
+```python
+from databricks_tools_core.unity_catalog import (
+    list_abac_policies,
+    query_column_tags,
+    get_masking_functions,
+    check_policy_quota,
+    preview_policy_changes,
+    create_abac_policy,
+    get_abac_policy,
+)
 
-Step 2: RECOMMEND
-─────────────────────────────────
-→ Agent generates policy recommendations based on discovered tags and UDFs
+# Step 1: ANALYZE — discover current state
+policies = list_abac_policies(securable_type="SCHEMA", securable_fullname="prod.finance")
+tags = query_column_tags(catalog_filter="prod", table_name="customers")
+udfs = get_masking_functions(catalog="prod", schema="finance")
 
-Step 3: PREVIEW
-─────────────────────────────────
-→ preview_policy_changes(
-      action="CREATE",
-      policy_name="mask_ssn_finance",
-      securable_type="SCHEMA",
-      securable_fullname="prod.finance",
-      policy_type="COLUMN_MASK",
-      function_name="prod.finance.mask_ssn",
-      to_principals=["analysts"],
-      tag_name="pii_type",
-      tag_value="ssn"
-  )
+# Step 2: RECOMMEND — agent generates policy recommendations based on tags and UDFs
 
-Step 4: APPROVE
-─────────────────────────────────
-→ Human reviews preview and replies "approve"
+# Step 3: CHECK QUOTA — ensure we can create a new policy
+quota = check_policy_quota(securable_type="SCHEMA", securable_fullname="prod.finance")
+assert quota["can_create"], f"Quota exceeded: {quota['current']}/{quota['max']}"
 
-Step 5: EXECUTE
-─────────────────────────────────
-→ create_abac_policy(
-      policy_name="mask_ssn_finance",
-      policy_type="COLUMN_MASK",
-      securable_type="SCHEMA",
-      securable_fullname="prod.finance",
-      function_name="prod.finance.mask_ssn",
-      to_principals=["analysts"],
-      tag_name="pii_type",
-      tag_value="ssn"
-  )
+# Step 4: PREVIEW — generate SQL for human review (no changes made)
+preview = preview_policy_changes(
+    action="CREATE",
+    policy_name="mask_ssn_finance",
+    securable_type="SCHEMA",
+    securable_fullname="prod.finance",
+    policy_type="COLUMN_MASK",
+    function_name="prod.finance.mask_ssn",
+    to_principals=["analysts"],
+    tag_name="pii_type",
+    tag_value="ssn",
+)
+# → Present preview["preview"]["equivalent_sql"] to user
 
-Step 6: VERIFY
-─────────────────────────────────
-→ get_abac_policy(
-      policy_name="mask_ssn_finance",
-      securable_type="SCHEMA",
-      securable_fullname="prod.finance"
-  )
+# Step 5: APPROVE — human reviews preview and replies "approve"
+
+# Step 6: EXECUTE — create the policy
+result = create_abac_policy(
+    policy_name="mask_ssn_finance",
+    policy_type="COLUMN_MASK",
+    securable_type="SCHEMA",
+    securable_fullname="prod.finance",
+    function_name="prod.finance.mask_ssn",
+    to_principals=["analysts"],
+    tag_name="pii_type",
+    tag_value="ssn",
+)
+
+# Step 7: VERIFY — confirm policy was created
+policy = get_abac_policy(
+    policy_name="mask_ssn_finance",
+    securable_type="SCHEMA",
+    securable_fullname="prod.finance",
+)
 ```
 
 ---
@@ -388,10 +486,30 @@ Step 6: VERIFY
 
 | Error | Cause | Solution |
 |-------|-------|----------|
-| `POLICY_QUOTA_EXCEEDED` | Too many policies on scope | Consolidate policies or use broader scope |
+| `POLICY_QUOTA_EXCEEDED` | Too many policies on scope | Use `check_policy_quota` first; consolidate or use broader scope |
 | `INVALID_TAG_VALUE` | Tag value not in governed tag's allowed values | Check governed tag config in UI |
-| `UDF_NOT_FOUND` | Masking UDF doesn't exist | Create UDF first, use fully qualified name |
-| `POLICY_ALREADY_EXISTS` | Duplicate policy name | Use different name or delete existing first |
-| `INSUFFICIENT_PERMISSIONS` | Missing `MANAGE` on securable | Grant `MANAGE` permission |
+| `UDF_NOT_FOUND` | Masking UDF doesn't exist | Create UDF first via `create_security_function`, use fully qualified name |
+| `POLICY_ALREADY_EXISTS` | Duplicate policy name | Use different name or `delete_abac_policy` first |
+| `INSUFFICIENT_PERMISSIONS` | Missing `MANAGE` on securable | `grant_privileges` with MANAGE |
 | `INVALID_SECURABLE_TYPE` | Wrong securable type string | Use `"CATALOG"`, `"SCHEMA"`, or `"TABLE"` |
-| `gov_admin not in except_principals` | Safety check failed | Always include `gov_admin` in except list |
+| `PRINCIPAL_NOT_FOUND` | Principal group doesn't exist | Verify group exists on the workspace |
+
+---
+
+## Implementation Map
+
+| MCP Tool | Implementation | Module |
+|----------|---------------|--------|
+| `list_abac_policies` | `list_abac_policies()` | `abac_policies` |
+| `get_abac_policy` | `get_abac_policy()` | `abac_policies` |
+| `get_table_policies` | `get_table_policies()` | `abac_policies` |
+| `get_masking_functions` | `get_masking_functions()` | `abac_policies` |
+| `check_policy_quota` | `check_policy_quota()` | `abac_policies` |
+| `get_schema_info` | `get_schema()` | `schemas` |
+| `get_catalog_info` | `get_catalog()` | `catalogs` |
+| `get_column_tags_api` | `query_column_tags()` | `tags` |
+| `list_table_policies_in_schema` | `list_tables()` + `get_table_policies()` | `tables` + `abac_policies` |
+| `preview_policy_changes` | `preview_policy_changes()` | `abac_policies` |
+| `create_abac_policy` | `create_abac_policy()` | `abac_policies` |
+| `update_abac_policy` | `update_abac_policy()` | `abac_policies` |
+| `delete_abac_policy` | `delete_abac_policy()` | `abac_policies` |
