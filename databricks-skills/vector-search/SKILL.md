@@ -309,9 +309,41 @@ embedding_source_columns=[
 ]
 ```
 
+## MCP Tools
+
+The following MCP tools are available for managing Vector Search infrastructure. These are **management tools** for creating and configuring endpoints/indexes. For agent-runtime querying, use the Databricks managed Vector Search MCP server or `VectorSearchRetrieverTool`.
+
+### Endpoint Management
+
+| Tool | Description |
+|------|-------------|
+| `create_vs_endpoint` | Create a Vector Search endpoint (STANDARD or STORAGE_OPTIMIZED) |
+| `get_vs_endpoint` | Get endpoint status and details |
+| `list_vs_endpoints` | List all endpoints in the workspace |
+| `delete_vs_endpoint` | Delete an endpoint (indexes must be deleted first) |
+
+### Index Management
+
+| Tool | Description |
+|------|-------------|
+| `create_vs_index` | Create a Delta Sync or Direct Access index |
+| `get_vs_index` | Get index status and configuration |
+| `list_vs_indexes` | List all indexes on an endpoint |
+| `delete_vs_index` | Delete an index |
+| `sync_vs_index` | Trigger sync for TRIGGERED pipeline indexes |
+
+### Query and Data
+
+| Tool | Description |
+|------|-------------|
+| `query_vs_index` | Query index with text, vector, or hybrid search (for testing) |
+| `upsert_vs_data` | Upsert vectors into a Direct Access index |
+| `delete_vs_data` | Delete vectors from a Direct Access index |
+| `scan_vs_index` | Scan/export index entries (for debugging) |
+
 ## Notes
 
-- **No MCP tools** - Use Python SDK directly (`w.vector_search_indexes.*`)
 - **Storage-Optimized is newer** - Better for most use cases unless you need <100ms latency
 - **Delta Sync recommended** - Easier than Direct Access for most scenarios
 - **Hybrid search** - Available for both Delta Sync and Direct Access indexes
+- **Management vs runtime** - MCP tools above handle lifecycle management; for agent tool-calling at runtime, use the Databricks managed Vector Search MCP server

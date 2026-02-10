@@ -23,4 +23,6 @@ from .tools import (
     unity_catalog,
     volume_files,
     genie,
+    vector_search,
+    lakebase,
 )

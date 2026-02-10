@@ -4,7 +4,8 @@
 Checks:
 1. Every skill directory has a SKILL.md file
 2. SKILL.md has valid YAML frontmatter with a 'name' field
-3. Skills match the ALL_SKILLS list in install_skills.sh
+3. Local skill directories match DATABRICKS_SKILLS in install_skills.sh
+   (MLflow skills are remote-only and excluded from directory checks)
 """
 
 import re
@@ -29,10 +30,9 @@ def parse_frontmatter(content: str) -> dict | None:
     return None
 
 
-def get_all_skills_from_script() -> set[str]:
-    """Parse ALL_SKILLS list from install_skills.sh."""
-    content = INSTALL_SCRIPT.read_text()
-    match = re.search(r'ALL_SKILLS="([^"]+)"', content)
+def get_skills_from_variable(content: str, var_name: str) -> set[str]:
+    """Parse a skill list variable from install_skills.sh."""
+    match = re.search(rf'^{var_name}="([^"]+)"', content, re.MULTILINE)
     if match:
         return set(match.group(1).split())
     return set()
@@ -41,15 +41,17 @@ def get_all_skills_from_script() -> set[str]:
 def main() -> int:
     errors = []
 
+    content = INSTALL_SCRIPT.read_text()
+
+    # Parse DATABRICKS_SKILLS (local skills with directories in this repo)
+    databricks_skills = get_skills_from_variable(content, "DATABRICKS_SKILLS")
+
     # Get actual skill directories
     actual_skills = {
         d.name
         for d in SKILLS_DIR.iterdir()
         if d.is_dir() and d.name not in SKIP_DIRS and not d.name.startswith(".")
     }
-
-    # Get skills registered in install script
-    registered_skills = get_all_skills_from_script()
 
     # Validate each skill directory
     for skill_dir in sorted(SKILLS_DIR.iterdir()):
@@ -74,15 +76,15 @@ def main() -> int:
         elif "name" not in frontmatter:
             errors.append(f"{skill_dir.name}: Missing 'name' field in frontmatter")
 
-    # Check for skills not in install script
-    orphaned = actual_skills - registered_skills
+    # Check for local skill directories not registered in DATABRICKS_SKILLS
+    orphaned = actual_skills - databricks_skills
     if orphaned:
-        errors.append(f"Skills exist but not in install_skills.sh ALL_SKILLS: {sorted(orphaned)}")
+        errors.append(f"Skills exist but not in install_skills.sh DATABRICKS_SKILLS: {sorted(orphaned)}")
 
-    # Check for skills in script but missing directory
-    missing = registered_skills - actual_skills
+    # Check for DATABRICKS_SKILLS entries missing a local directory
+    missing = databricks_skills - actual_skills
     if missing:
-        errors.append(f"Skills in install_skills.sh but no directory found: {sorted(missing)}")
+        errors.append(f"Skills in install_skills.sh DATABRICKS_SKILLS but no directory found: {sorted(missing)}")
 
     # Report results
     if errors:

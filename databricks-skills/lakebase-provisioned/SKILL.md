@@ -43,7 +43,7 @@ w = WorkspaceClient()
 # Create a database instance
 instance = w.database.create_database_instance(
     name="my-lakebase-instance",
-    capacity="SMALL",  # SMALL, MEDIUM, LARGE
+    capacity="CU_1",  # CU_1, CU_2, CU_4, CU_8
     stopped=False
 )
 print(f"Instance created: {instance.name}")
@@ -221,6 +221,37 @@ mlflow.langchain.log_model(
 )
 ```
 
+## MCP Tools
+
+The following MCP tools are available for managing Lakebase Provisioned infrastructure.
+
+### Instance Management
+
+| Tool | Description |
+|------|-------------|
+| `create_lakebase_instance` | Create a managed PostgreSQL instance (CU_1, CU_2, CU_4, CU_8) |
+| `get_lakebase_instance` | Get instance details (state, DNS, capacity) |
+| `list_lakebase_instances` | List all instances in the workspace |
+| `update_lakebase_instance` | Resize or start/stop an instance |
+| `delete_lakebase_instance` | Delete an instance |
+| `generate_lakebase_credential` | Generate OAuth token for PostgreSQL connections (1-hour expiry) |
+
+### Unity Catalog Registration
+
+| Tool | Description |
+|------|-------------|
+| `create_lakebase_catalog` | Register a Lakebase instance as a Unity Catalog catalog. Params: `name`, `instance_name`, `database_name` (default: "databricks_postgres"), `create_database_if_not_exists` (default: False). The catalog is read-only. |
+| `get_lakebase_catalog` | Get catalog registration details |
+| `delete_lakebase_catalog` | Remove catalog registration (does not delete instance) |
+
+### Reverse ETL (Synced Tables)
+
+| Tool | Description |
+|------|-------------|
+| `create_synced_table` | Create a synced table from Delta to Lakebase. Params: `instance_name`, `source_table_name`, `target_table_name`, `primary_key_columns` (optional), `scheduling_policy` ("TRIGGERED"/"SNAPSHOT"/"CONTINUOUS", default: "TRIGGERED") |
+| `get_synced_table` | Get synced table status |
+| `delete_synced_table` | Delete a synced table |
+
 ## Reference Files
 
 - [connection-patterns.md](connection-patterns.md) - Detailed connection patterns for different use cases
@@ -232,7 +263,7 @@ mlflow.langchain.log_model(
 # Create instance
 databricks database create-database-instance \
     --name my-lakebase-instance \
-    --capacity SMALL
+    --capacity CU_1
 
 # Get instance details
 databricks database get-database-instance --name my-lakebase-instance
@@ -274,6 +305,7 @@ databricks database start-database-instance --name my-lakebase-instance
 
 ## Notes
 
+- **Capacity values** use compute unit sizing: `CU_1`, `CU_2`, `CU_4`, `CU_8`.
 - **Lakebase Autoscaling** is a newer offering with automatic scaling but limited regional availability. This skill focuses on **Lakebase Provisioned** which is more widely available.
 - For memory/state in LangChain agents, use `databricks-langchain[memory]` which includes Lakebase support.
 - Tokens are short-lived (1 hour) - production apps MUST implement token refresh.
