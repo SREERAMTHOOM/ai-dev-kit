@@ -1,10 +1,10 @@
 """
-Unity Catalog - ABAC Policy Operations
+Unity Catalog - FGAC Policy Operations
 
-Functions for managing Attribute-Based Access Control (ABAC) policies
+Functions for managing Fine-Grained Access Control (FGAC) policies
 via the Databricks Python SDK (WorkspaceClient.policies).
 
-ABAC policies bind governed tags to masking UDFs or row filters, scoped to
+FGAC policies bind governed tags to masking UDFs or row filters, scoped to
 catalogs, schemas, or tables, and targeted at specific principals.
 
 Policy quotas:
@@ -13,8 +13,14 @@ Policy quotas:
   - Table:    5 policies max
 """
 
+import base64
+import hashlib
+import hmac
+import json
 import logging
+import os
 import re
+import time
 from typing import Any, Dict, List, Optional
 
 from ..auth import get_workspace_client
@@ -26,6 +32,82 @@ _IDENTIFIER_PATTERN = re.compile(r"^[a-zA-Z0-9_][a-zA-Z0-9_.\-]*$")
 _VALID_SECURABLE_TYPES = {"CATALOG", "SCHEMA", "TABLE"}
 _VALID_POLICY_TYPES = {"COLUMN_MASK", "ROW_FILTER"}
 _POLICY_QUOTAS = {"CATALOG": 10, "SCHEMA": 10, "TABLE": 5}
+
+_APPROVAL_SECRET = os.environ.get("FGAC_APPROVAL_SECRET", "fgac-default-dev-secret")
+_ADMIN_GROUP = os.environ.get("FGAC_ADMIN_GROUP", "admins")
+_TOKEN_TTL_SECONDS = 600  # 10 minutes
+def _generate_approval_token(params: dict) -> str:
+    """Generate an HMAC-based approval token binding preview params to a timestamp."""
+    clean_params = {k: v for k, v in params.items() if v is not None}
+    clean_params["timestamp"] = int(time.time())
+    payload = json.dumps(clean_params, sort_keys=True)
+    signature = hmac.new(
+        _APPROVAL_SECRET.encode(), payload.encode(), hashlib.sha256
+    ).hexdigest()
+    b64_payload = base64.b64encode(payload.encode()).decode()
+    return f"{signature}:{b64_payload}"
+
+
+def _validate_approval_token(approval_token: str, current_params: dict) -> None:
+    """Validate an approval token against current parameters.
+
+    Raises ValueError if the token is invalid, expired, or params don't match.
+    """
+    try:
+        signature, b64_payload = approval_token.split(":", 1)
+    except (ValueError, AttributeError):
+        raise ValueError("Invalid or expired approval token")
+
+    try:
+        payload = base64.b64decode(b64_payload).decode()
+    except Exception:
+        raise ValueError("Invalid or expired approval token")
+
+    expected_sig = hmac.new(
+        _APPROVAL_SECRET.encode(), payload.encode(), hashlib.sha256
+    ).hexdigest()
+    if not hmac.compare_digest(signature, expected_sig):
+        raise ValueError("Invalid or expired approval token")
+
+    try:
+        token_data = json.loads(payload)
+    except json.JSONDecodeError:
+        raise ValueError("Invalid or expired approval token")
+
+    ts = token_data.pop("timestamp", 0)
+    if abs(time.time() - ts) > _TOKEN_TTL_SECONDS:
+        raise ValueError("Invalid or expired approval token")
+
+    # Map preview action to mutation action
+    action_map = {"CREATE": "create", "UPDATE": "update", "DELETE": "delete"}
+    token_action = token_data.pop("action", None)
+    current_action = current_params.pop("action", None)
+    if token_action and current_action:
+        if action_map.get(token_action) != current_action:
+            raise ValueError("Invalid or expired approval token")
+
+    # Compare remaining params
+    clean_current = {k: v for k, v in current_params.items() if v is not None}
+    if token_data != clean_current:
+        raise ValueError("Invalid or expired approval token")
+
+
+def _check_admin_group() -> dict:
+    """Verify the current user belongs to the configured admin group.
+
+    Raises PermissionError if user is not a member.
+    """
+    w = get_workspace_client()
+    me = w.current_user.me()
+    group_names = [g.display for g in (me.groups or []) if g.display]
+    if _ADMIN_GROUP not in group_names:
+        raise PermissionError(
+            f"User '{me.user_name}' is not a member of admin group '{_ADMIN_GROUP}'. "
+            f"FGAC mutating operations require membership in the '{_ADMIN_GROUP}' group."
+        )
+    return {"is_admin": True, "user": me.user_name, "admin_group": _ADMIN_GROUP}
+
+
 def _validate_identifier(name: str) -> str:
     """Validate a SQL identifier to prevent injection."""
     if not _IDENTIFIER_PATTERN.match(name):
@@ -98,14 +180,14 @@ def _policy_to_dict(policy: Any) -> Dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-def list_abac_policies(
+def list_fgac_policies(
     securable_type: str,
     securable_fullname: str,
     include_inherited: bool = True,
     policy_type: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
-    List ABAC policies on a catalog, schema, or table.
+    List FGAC policies on a catalog, schema, or table.
 
     Args:
         securable_type: "CATALOG", "SCHEMA", or "TABLE"
@@ -148,13 +230,13 @@ def list_abac_policies(
     }
 
 
-def get_abac_policy(
+def get_fgac_policy(
     policy_name: str,
     securable_type: str,
     securable_fullname: str,
 ) -> Dict[str, Any]:
     """
-    Get details for a specific ABAC policy by name.
+    Get details for a specific FGAC policy by name.
 
     Args:
         policy_name: Policy name
@@ -189,7 +271,7 @@ def get_table_policies(
     Get column masks and row filters applied to a specific table.
 
     Uses the Unity Catalog REST API directly to retrieve effective
-    column masks and row filters, including those derived from ABAC policies.
+    column masks and row filters, including those derived from FGAC policies.
 
     Args:
         catalog: Catalog name
@@ -252,7 +334,7 @@ def get_masking_functions(
     List masking UDFs in a schema.
 
     Retrieves all user-defined functions in the specified schema and returns
-    their metadata for use in ABAC policy creation.
+    their metadata for use in FGAC policy creation.
 
     Args:
         catalog: Catalog name
@@ -482,13 +564,38 @@ def preview_policy_changes(
         }
         warnings.append("This action is irreversible. The policy will be permanently removed.")
 
+    # Generate approval token binding these params
+    token_params = {
+        "action": action,
+        "policy_name": policy_name,
+        "securable_type": stype,
+        "securable_fullname": securable_fullname,
+    }
+    if policy_type:
+        token_params["policy_type"] = _validate_policy_type(policy_type)
+    if to_principals is not None:
+        token_params["to_principals"] = to_principals
+    if except_principals is not None:
+        token_params["except_principals"] = safe_except
+    if function_name is not None:
+        token_params["function_name"] = function_name
+    if tag_name is not None:
+        token_params["tag_name"] = tag_name
+    if tag_value is not None:
+        token_params["tag_value"] = tag_value
+    if comment is not None:
+        token_params["comment"] = comment
+
+    approval_token = _generate_approval_token(token_params)
+
     return {
         "success": True,
         "action": action,
         "preview": preview,
         "warnings": warnings,
         "requires_approval": True,
-        "message": "Review the preview above. Reply 'approve' to execute.",
+        "approval_token": approval_token,
+        "message": "Review the preview above. Reply 'approve' to execute, passing the approval_token.",
     }
 
 
@@ -497,7 +604,7 @@ def preview_policy_changes(
 # ---------------------------------------------------------------------------
 
 
-def create_abac_policy(
+def create_fgac_policy(
     policy_name: str,
     policy_type: str,
     securable_type: str,
@@ -505,12 +612,16 @@ def create_abac_policy(
     function_name: str,
     to_principals: List[str],
     tag_name: str,
+    approval_token: str,
     tag_value: Optional[str] = None,
     except_principals: Optional[List[str]] = None,
     comment: str = "",
 ) -> Dict[str, Any]:
     """
-    Create a new ABAC policy (COLUMN_MASK or ROW_FILTER).
+    Create a new FGAC policy (COLUMN_MASK or ROW_FILTER).
+
+    Requires a valid approval_token from preview_policy_changes() and
+    the caller must be a member of the configured admin group.
 
     Args:
         policy_name: Policy name (must be unique within the securable scope)
@@ -520,6 +631,7 @@ def create_abac_policy(
         function_name: Fully qualified UDF name (e.g., "catalog.schema.mask_ssn")
         to_principals: Users/groups the policy applies to
         tag_name: Tag key to match columns on
+        approval_token: Token from preview_policy_changes()
         tag_value: Tag value to match (optional; omit for hasTag vs hasTagValue)
         except_principals: Excluded principals
         comment: Policy description
@@ -527,8 +639,27 @@ def create_abac_policy(
     Returns:
         Dict with creation status and policy details
     """
+    _check_admin_group()
     ptype = _validate_policy_type(policy_type)
     stype = _validate_securable_type(securable_type)
+    current_params = {
+        "action": "create",
+        "policy_name": policy_name,
+        "policy_type": ptype,
+        "securable_type": stype,
+        "securable_fullname": securable_fullname,
+        "function_name": function_name,
+        "to_principals": to_principals,
+        "tag_name": tag_name,
+    }
+    if tag_value is not None:
+        current_params["tag_value"] = tag_value
+    if except_principals is not None:
+        current_params["except_principals"] = list(except_principals)
+    if comment:
+        current_params["comment"] = comment
+    _validate_approval_token(approval_token, current_params)
+
     _validate_identifier(securable_fullname)
     _validate_identifier(function_name)
 
@@ -589,16 +720,20 @@ def create_abac_policy(
     }
 
 
-def update_abac_policy(
+def update_fgac_policy(
     policy_name: str,
     securable_type: str,
     securable_fullname: str,
+    approval_token: str,
     to_principals: Optional[List[str]] = None,
     except_principals: Optional[List[str]] = None,
     comment: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
-    Update an existing ABAC policy's principals or comment.
+    Update an existing FGAC policy's principals or comment.
+
+    Requires a valid approval_token from preview_policy_changes() and
+    the caller must be a member of the configured admin group.
 
     Only principals and comment can be modified. To change the UDF, tag
     matching, or scope, drop and recreate the policy.
@@ -607,6 +742,7 @@ def update_abac_policy(
         policy_name: Policy name
         securable_type: "CATALOG", "SCHEMA", or "TABLE"
         securable_fullname: Fully qualified securable name
+        approval_token: Token from preview_policy_changes()
         to_principals: Updated list of principals the policy applies to
         except_principals: Updated excluded principals
         comment: Updated policy description
@@ -614,7 +750,22 @@ def update_abac_policy(
     Returns:
         Dict with update status and applied changes
     """
+    _check_admin_group()
     stype = _validate_securable_type(securable_type)
+    current_params = {
+        "action": "update",
+        "policy_name": policy_name,
+        "securable_type": stype,
+        "securable_fullname": securable_fullname,
+    }
+    if to_principals is not None:
+        current_params["to_principals"] = to_principals
+    if except_principals is not None:
+        current_params["except_principals"] = list(except_principals)
+    if comment is not None:
+        current_params["comment"] = comment
+    _validate_approval_token(approval_token, current_params)
+
     _validate_identifier(securable_fullname)
 
     from databricks.sdk.service.catalog import PolicyInfo
@@ -670,13 +821,17 @@ def update_abac_policy(
     }
 
 
-def delete_abac_policy(
+def delete_fgac_policy(
     policy_name: str,
     securable_type: str,
     securable_fullname: str,
+    approval_token: str,
 ) -> Dict[str, Any]:
     """
-    Delete an ABAC policy.
+    Delete an FGAC policy.
+
+    Requires a valid approval_token from preview_policy_changes() and
+    the caller must be a member of the configured admin group.
 
     This is irreversible. The policy will be permanently removed.
 
@@ -684,12 +839,21 @@ def delete_abac_policy(
         policy_name: Policy name
         securable_type: "CATALOG", "SCHEMA", or "TABLE"
         securable_fullname: Fully qualified securable name
+        approval_token: Token from preview_policy_changes()
 
     Returns:
         Dict with deletion status
     """
+    _check_admin_group()
     stype = _validate_securable_type(securable_type)
     _validate_identifier(securable_fullname)
+    current_params = {
+        "action": "delete",
+        "policy_name": policy_name,
+        "securable_type": stype,
+        "securable_fullname": securable_fullname,
+    }
+    _validate_approval_token(approval_token, current_params)
 
     w = get_workspace_client()
     w.policies.delete_policy(
