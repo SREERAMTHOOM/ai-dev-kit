@@ -167,10 +167,15 @@ get_table_policies(
 
 List masking UDFs in a schema.
 
+> **Cross-catalog UDFs:** Masking UDFs can reside in any catalog/schema, not just the policy scope. Use `udf_catalog` and `udf_schema` to discover UDFs stored in a shared governance schema (e.g., `governance.masking_udfs`). These default to `catalog`/`schema` when not specified.
+
 ```python
 get_masking_functions(
     catalog: str,
     schema: str,
+    # To discover UDFs in a different catalog/schema:
+    udf_catalog: str = None,  # defaults to catalog
+    udf_schema: str = None,   # defaults to schema
 )
 ```
 
@@ -378,6 +383,9 @@ Step 1: ANALYZE
 → list_fgac_policies(securable_type="SCHEMA", securable_fullname="prod.finance")
 → get_column_tags_api(catalog="prod", schema="finance", table="customers")
 → get_masking_functions(catalog="prod", schema="finance")
+  # If UDFs are in a shared governance schema:
+→ get_masking_functions(catalog="prod", schema="finance",
+      udf_catalog="governance", udf_schema="masking_udfs")
 
 Step 2: RECOMMEND
 ─────────────────────────────────
@@ -391,7 +399,7 @@ Step 3: PREVIEW (returns approval_token)
       securable_type="SCHEMA",
       securable_fullname="prod.finance",
       policy_type="COLUMN_MASK",
-      function_name="prod.finance.mask_ssn",
+      function_name="governance.masking_udfs.mask_ssn",
       to_principals=["analysts"],
       tag_name="pii_type",
       tag_value="ssn"
@@ -409,7 +417,7 @@ Step 5: EXECUTE (pass approval_token)
       policy_type="COLUMN_MASK",
       securable_type="SCHEMA",
       securable_fullname="prod.finance",
-      function_name="prod.finance.mask_ssn",
+      function_name="governance.masking_udfs.mask_ssn",
       to_principals=["analysts"],
       tag_name="pii_type",
       tag_value="ssn",
@@ -511,6 +519,35 @@ policy = w.policies.create_policy(policy_info=policy_info)
 ```
 
 Change `on_securable_type` and `on_securable_fullname` to target catalog or table scope.
+
+### Create Column Mask Policy (Cross-Catalog UDF)
+
+The UDF can live in a separate governance catalog/schema from the policy scope:
+
+```python
+# UDF in governance.masking_udfs, policy on prod.finance
+policy_info = PolicyInfo(
+    name="mask_ssn_finance",
+    policy_type=PolicyType.POLICY_TYPE_COLUMN_MASK,
+    on_securable_type=SecurableType.SCHEMA,
+    on_securable_fullname="prod.finance",
+    for_securable_type=SecurableType.TABLE,
+    to_principals=["analysts"],
+    except_principals=["gov_admin"],
+    comment="Mask SSN columns in prod.finance using shared governance UDF",
+    column_mask=ColumnMaskOptions(
+        function_name="governance.masking_udfs.mask_ssn",
+        on_column="masked_col",
+    ),
+    match_columns=[
+        MatchColumn(
+            alias="masked_col",
+            condition="hasTagValue('pii_type', 'ssn')",
+        )
+    ],
+)
+policy = w.policies.create_policy(policy_info=policy_info)
+```
 
 ### Create Row Filter Policy
 

@@ -449,7 +449,8 @@ def preview_policy_changes(
         policy_type: "COLUMN_MASK" or "ROW_FILTER" (required for CREATE)
         to_principals: Principals the policy applies to
         except_principals: Excluded principals
-        function_name: Fully qualified UDF name (required for CREATE)
+        function_name: Fully qualified UDF name (required for CREATE).
+            Can reference any catalog/schema, not just the policy scope.
         tag_name: Tag key to match (required for CREATE)
         tag_value: Tag value to match (optional; omit for hasTag vs hasTagValue)
         comment: Policy description
@@ -628,7 +629,9 @@ def create_fgac_policy(
         policy_type: "COLUMN_MASK" or "ROW_FILTER"
         securable_type: "CATALOG", "SCHEMA", or "TABLE"
         securable_fullname: Fully qualified securable name
-        function_name: Fully qualified UDF name (e.g., "catalog.schema.mask_ssn")
+        function_name: Fully qualified UDF name (e.g., "catalog.schema.mask_ssn").
+            The UDF can reside in any catalog/schema, not just the policy scope.
+            For example, a policy on "prod.finance" can use "governance.masking_udfs.mask_ssn".
         to_principals: Users/groups the policy applies to
         tag_name: Tag key to match columns on
         approval_token: Token from preview_policy_changes()

@@ -39,6 +39,8 @@ def manage_uc_fgac_policies(
     catalog: str = None,
     schema: str = None,
     table: str = None,
+    udf_catalog: str = None,
+    udf_schema: str = None,
     preview_action: str = None,
     approval_token: str = None,
 ) -> Dict[str, Any]:
@@ -52,7 +54,7 @@ def manage_uc_fgac_policies(
     - list: List policies on a securable. Params: securable_type, securable_fullname, include_inherited, policy_type
     - get: Get a specific policy. Params: policy_name, securable_type, securable_fullname
     - get_table_policies: Get column masks and row filters on a table. Params: catalog, schema, table
-    - get_masking_functions: List masking UDFs in a schema. Params: catalog, schema
+    - get_masking_functions: List masking UDFs in a schema. Params: catalog, schema (or udf_catalog, udf_schema to discover UDFs in a different catalog/schema)
     - check_quota: Check policy quota on a securable. Params: securable_type, securable_fullname
     - preview: Preview policy changes without executing. Params: preview_action ("CREATE"/"UPDATE"/"DELETE"),
         policy_name, securable_type, securable_fullname, plus policy_type/function_name/tag_name/to_principals for CREATE
@@ -80,6 +82,8 @@ def manage_uc_fgac_policies(
         catalog: Catalog name (for get_table_policies, get_masking_functions)
         schema: Schema name (for get_table_policies, get_masking_functions)
         table: Table name (for get_table_policies)
+        udf_catalog: Catalog where masking UDFs reside (for get_masking_functions; defaults to catalog)
+        udf_schema: Schema where masking UDFs reside (for get_masking_functions; defaults to schema)
         preview_action: Sub-action for preview: "CREATE", "UPDATE", or "DELETE"
         approval_token: Approval token from preview action (required for create/update/delete)
 
@@ -109,8 +113,8 @@ def manage_uc_fgac_policies(
         )
     elif act == "get_masking_functions":
         return _get_masking_functions(
-            catalog=catalog,
-            schema=schema,
+            catalog=udf_catalog or catalog,
+            schema=udf_schema or schema,
         )
     elif act == "check_quota":
         return _check_policy_quota(
