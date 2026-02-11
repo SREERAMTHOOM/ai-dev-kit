@@ -1,23 +1,24 @@
 """
-Integration tests for Unity Catalog ABAC Policy operations.
+Integration tests for Unity Catalog FGAC Policy operations.
 
-Tests the abac_policies module functions:
-- list_abac_policies
-- get_abac_policy
+Tests the fgac_policies module functions:
+- list_fgac_policies
+- get_fgac_policy
 - get_table_policies
 - get_masking_functions
 - check_policy_quota
 - preview_policy_changes
-- create_abac_policy / update_abac_policy / delete_abac_policy
+- create_fgac_policy / update_fgac_policy / delete_fgac_policy
 
 Governed Tags
 -------------
-ABAC policies require **governed tags** (not regular metadata tags).
+FGAC policies require **governed tags** (not regular metadata tags).
 The CRUD tests automatically create and clean up governed tags via the
 Tag Policies API (``w.tag_policies``). No manual UI setup is needed.
 """
 
 import logging
+import os
 import time
 
 import pytest
@@ -28,16 +29,17 @@ from databricks_tools_core.unity_catalog import (
     create_security_function,
     set_tags,
 )
-from databricks_tools_core.unity_catalog.abac_policies import (
-    list_abac_policies,
-    get_abac_policy,
+from databricks_tools_core.unity_catalog.fgac_policies import (
+    list_fgac_policies,
+    get_fgac_policy,
     get_table_policies,
     get_masking_functions,
     check_policy_quota,
     preview_policy_changes,
-    create_abac_policy,
-    update_abac_policy,
-    delete_abac_policy,
+    create_fgac_policy,
+    update_fgac_policy,
+    delete_fgac_policy,
+    _check_admin_group,
 )
 
 logger = logging.getLogger(__name__)
@@ -51,12 +53,12 @@ UC_TEST_PREFIX = "uc_test"
 
 
 @pytest.mark.integration
-class TestListAbacPolicies:
-    """Tests for listing ABAC policies."""
+class TestListFgacPolicies:
+    """Tests for listing FGAC policies."""
 
     def test_list_policies_on_catalog(self, test_catalog: str):
         """Should list policies on a catalog (may be empty)."""
-        result = list_abac_policies(
+        result = list_fgac_policies(
             securable_type="CATALOG",
             securable_fullname=test_catalog,
         )
@@ -71,7 +73,7 @@ class TestListAbacPolicies:
     def test_list_policies_on_schema(self, test_catalog: str, uc_test_schema: str):
         """Should list policies on a schema."""
         full_name = f"{test_catalog}.{uc_test_schema}"
-        result = list_abac_policies(
+        result = list_fgac_policies(
             securable_type="SCHEMA",
             securable_fullname=full_name,
         )
@@ -83,7 +85,7 @@ class TestListAbacPolicies:
 
     def test_list_policies_with_type_filter(self, test_catalog: str):
         """Should filter policies by type."""
-        result = list_abac_policies(
+        result = list_fgac_policies(
             securable_type="CATALOG",
             securable_fullname=test_catalog,
             policy_type="COLUMN_MASK",
@@ -96,7 +98,7 @@ class TestListAbacPolicies:
 
     def test_list_policies_without_inherited(self, test_catalog: str):
         """Should list only direct policies when include_inherited=False."""
-        result = list_abac_policies(
+        result = list_fgac_policies(
             securable_type="CATALOG",
             securable_fullname=test_catalog,
             include_inherited=False,
@@ -336,13 +338,13 @@ class TestPreviewPolicyChanges:
 
 
 @pytest.mark.integration
-class TestAbacPolicyValidation:
-    """Tests for input validation in ABAC policy functions."""
+class TestFgacPolicyValidation:
+    """Tests for input validation in FGAC policy functions."""
 
     def test_invalid_securable_type_raises(self):
         """Should raise ValueError for invalid securable type."""
         with pytest.raises(ValueError) as exc_info:
-            list_abac_policies(
+            list_fgac_policies(
                 securable_type="INVALID",
                 securable_fullname="test",
             )
@@ -440,7 +442,7 @@ class TestAbacPolicyValidation:
     def test_invalid_identifier_raises(self):
         """Should raise ValueError for SQL injection attempts."""
         with pytest.raises(ValueError) as exc_info:
-            list_abac_policies(
+            list_fgac_policies(
                 securable_type="CATALOG",
                 securable_fullname="DROP TABLE; --",
             )
@@ -449,12 +451,212 @@ class TestAbacPolicyValidation:
 
 
 # ---------------------------------------------------------------------------
+# Approval token enforcement tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.integration
+class TestApprovalTokenEnforcement:
+    """Tests for approval token guardrails on mutating operations."""
+
+    def test_create_without_token_raises(self):
+        """create_fgac_policy without approval_token should raise TypeError."""
+        with pytest.raises(TypeError):
+            create_fgac_policy(
+                policy_name="test_no_token",
+                policy_type="COLUMN_MASK",
+                securable_type="SCHEMA",
+                securable_fullname="cat.sch",
+                function_name="cat.sch.fn",
+                to_principals=["analysts"],
+                tag_name="pii",
+            )
+
+    def test_create_with_invalid_token_raises(self):
+        """create_fgac_policy with an invalid token should raise ValueError."""
+        with pytest.raises((ValueError, PermissionError)):
+            create_fgac_policy(
+                policy_name="test_bad_token",
+                policy_type="COLUMN_MASK",
+                securable_type="SCHEMA",
+                securable_fullname="cat.sch",
+                function_name="cat.sch.fn",
+                to_principals=["analysts"],
+                tag_name="pii",
+                approval_token="garbage",
+            )
+
+    def test_preview_returns_approval_token(self):
+        """preview_policy_changes should return an approval_token."""
+        result = preview_policy_changes(
+            action="CREATE",
+            policy_name="test_token_preview",
+            securable_type="SCHEMA",
+            securable_fullname="my_catalog.my_schema",
+            policy_type="COLUMN_MASK",
+            to_principals=["analysts"],
+            function_name="my_catalog.my_schema.mask_ssn",
+            tag_name="pii_type",
+            tag_value="ssn",
+        )
+
+        assert result["success"] is True
+        assert "approval_token" in result
+        assert isinstance(result["approval_token"], str)
+        assert ":" in result["approval_token"]
+        logger.info("Preview returned approval token")
+
+    def test_full_preview_then_create_workflow(
+        self,
+        test_catalog: str,
+        uc_test_schema: str,
+        uc_test_table: str,
+        unique_name: str,
+        warehouse_id: str,
+        cleanup_functions,
+        cleanup_policies,
+    ):
+        """Should preview, extract token, then create with token (happy path)."""
+        full_schema = f"{test_catalog}.{uc_test_schema}"
+        policy_name = f"{UC_TEST_PREFIX}_tok_{unique_name}"
+        tag_key = f"uc_test_tok_{unique_name}"
+        tag_value = "email"
+
+        cleanup_policies((policy_name, "SCHEMA", full_schema))
+
+        TestFgacPolicyCRUD._create_governed_tag(tag_key, [tag_value])
+
+        try:
+            fn_name = f"{test_catalog}.{uc_test_schema}.{UC_TEST_PREFIX}_tok_fn_{unique_name}"
+            cleanup_functions(fn_name)
+
+            create_security_function(
+                function_name=fn_name,
+                parameter_name="val",
+                parameter_type="STRING",
+                return_type="STRING",
+                function_body="RETURN CASE WHEN val IS NULL THEN NULL ELSE '***' END",
+                warehouse_id=warehouse_id,
+            )
+
+            set_tags(
+                object_type="column",
+                full_name=uc_test_table,
+                column_name="email",
+                tags={tag_key: tag_value},
+                warehouse_id=warehouse_id,
+            )
+
+            # Preview to get token
+            preview = preview_policy_changes(
+                action="CREATE",
+                policy_name=policy_name,
+                securable_type="SCHEMA",
+                securable_fullname=full_schema,
+                policy_type="COLUMN_MASK",
+                to_principals=["account users"],
+                function_name=fn_name,
+                tag_name=tag_key,
+                tag_value=tag_value,
+                comment=f"Token test {unique_name}",
+            )
+            token = preview["approval_token"]
+
+            # Create with token
+            result = create_fgac_policy(
+                policy_name=policy_name,
+                policy_type="COLUMN_MASK",
+                securable_type="SCHEMA",
+                securable_fullname=full_schema,
+                function_name=fn_name,
+                to_principals=["account users"],
+                tag_name=tag_key,
+                approval_token=token,
+                tag_value=tag_value,
+                comment=f"Token test {unique_name}",
+            )
+
+            assert result["success"] is True
+            assert result["action"] == "created"
+            logger.info("Full preview-then-create workflow passed")
+
+            # Clean up via SDK directly (bypass guardrails)
+            w = get_workspace_client()
+            w.policies.delete_policy(
+                on_securable_type="SCHEMA",
+                on_securable_fullname=full_schema,
+                name=policy_name,
+            )
+
+        finally:
+            TestFgacPolicyCRUD._delete_governed_tag(tag_key)
+
+    def test_token_with_mismatched_params_raises(self):
+        """Token from preview with name A should not work for create with name B."""
+        preview = preview_policy_changes(
+            action="CREATE",
+            policy_name="policy_a",
+            securable_type="SCHEMA",
+            securable_fullname="cat.sch",
+            policy_type="COLUMN_MASK",
+            to_principals=["analysts"],
+            function_name="cat.sch.mask",
+            tag_name="pii",
+        )
+        token = preview["approval_token"]
+
+        with pytest.raises((ValueError, PermissionError)):
+            create_fgac_policy(
+                policy_name="policy_b",  # Different name!
+                policy_type="COLUMN_MASK",
+                securable_type="SCHEMA",
+                securable_fullname="cat.sch",
+                function_name="cat.sch.mask",
+                to_principals=["analysts"],
+                tag_name="pii",
+                approval_token=token,
+            )
+
+
+# ---------------------------------------------------------------------------
+# Admin group check tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.integration
+class TestAdminGroupCheck:
+    """Tests for admin group membership verification."""
+
+    def test_admin_check_passes(self):
+        """Should pass for workspace admin user (test profile user)."""
+        result = _check_admin_group()
+        assert result["is_admin"] is True
+        assert result["user"] is not None
+        assert result["admin_group"] == "admins"
+        logger.info(f"Admin check passed for user: {result['user']}")
+
+    def test_admin_check_custom_group_fails(self):
+        """Should raise PermissionError for a non-existent group."""
+        import databricks_tools_core.unity_catalog.fgac_policies as fgac_mod
+
+        original = fgac_mod._ADMIN_GROUP
+        try:
+            fgac_mod._ADMIN_GROUP = "nonexistent_group_xyz_12345"
+            with pytest.raises(PermissionError) as exc_info:
+                _check_admin_group()
+            assert "nonexistent_group_xyz_12345" in str(exc_info.value)
+            logger.info("Admin check correctly denied for non-existent group")
+        finally:
+            fgac_mod._ADMIN_GROUP = original
+
+
+# ---------------------------------------------------------------------------
 # CRUD lifecycle tests
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.integration
-class TestAbacPolicyCRUD:
+class TestFgacPolicyCRUD:
     """Tests for create, get, update, and delete policy operations.
 
     Each test creates its own governed tag via the Tag Policies API,
@@ -476,7 +678,7 @@ class TestAbacPolicyCRUD:
         )
         logger.info(f"Created governed tag: {tag_key} (values={allowed_values})")
 
-        # Wait for governed tag to propagate to the ABAC policy system
+        # Wait for governed tag to propagate to the FGAC policy system
         logger.info("Waiting 30s for governed tag propagation...")
         time.sleep(30)
 
@@ -538,9 +740,26 @@ class TestAbacPolicyCRUD:
             )
             logger.info(f"Tagged column email with {tag_key}={tag_value}")
 
+            # --- PREVIEW CREATE ---
+            logger.info(f"Previewing FGAC policy creation: {policy_name}")
+            create_preview = preview_policy_changes(
+                action="CREATE",
+                policy_name=policy_name,
+                securable_type="SCHEMA",
+                securable_fullname=full_schema,
+                policy_type="COLUMN_MASK",
+                to_principals=["account users"],
+                function_name=fn_name,
+                tag_name=tag_key,
+                tag_value=tag_value,
+                comment=f"Test policy {unique_name}",
+            )
+            assert "approval_token" in create_preview
+            create_token = create_preview["approval_token"]
+
             # --- CREATE ---
-            logger.info(f"Creating ABAC policy: {policy_name}")
-            create_result = create_abac_policy(
+            logger.info(f"Creating FGAC policy: {policy_name}")
+            create_result = create_fgac_policy(
                 policy_name=policy_name,
                 policy_type="COLUMN_MASK",
                 securable_type="SCHEMA",
@@ -548,6 +767,7 @@ class TestAbacPolicyCRUD:
                 function_name=fn_name,
                 to_principals=["account users"],
                 tag_name=tag_key,
+                approval_token=create_token,
                 tag_value=tag_value,
                 comment=f"Test policy {unique_name}",
             )
@@ -559,7 +779,7 @@ class TestAbacPolicyCRUD:
 
             # --- GET ---
             logger.info(f"Getting policy: {policy_name}")
-            get_result = get_abac_policy(
+            get_result = get_fgac_policy(
                 policy_name=policy_name,
                 securable_type="SCHEMA",
                 securable_fullname=full_schema,
@@ -569,12 +789,24 @@ class TestAbacPolicyCRUD:
             assert get_result["policy"]["name"] == policy_name
             logger.info(f"Policy details: {get_result['policy']}")
 
-            # --- UPDATE ---
-            logger.info(f"Updating policy: {policy_name}")
-            update_result = update_abac_policy(
+            # --- PREVIEW UPDATE ---
+            logger.info(f"Previewing update for: {policy_name}")
+            update_preview = preview_policy_changes(
+                action="UPDATE",
                 policy_name=policy_name,
                 securable_type="SCHEMA",
                 securable_fullname=full_schema,
+                comment=f"Updated test policy {unique_name}",
+            )
+            update_token = update_preview["approval_token"]
+
+            # --- UPDATE ---
+            logger.info(f"Updating policy: {policy_name}")
+            update_result = update_fgac_policy(
+                policy_name=policy_name,
+                securable_type="SCHEMA",
+                securable_fullname=full_schema,
+                approval_token=update_token,
                 comment=f"Updated test policy {unique_name}",
             )
 
@@ -584,7 +816,7 @@ class TestAbacPolicyCRUD:
             logger.info(f"Policy updated: {update_result['changes']}")
 
             # --- Verify in list ---
-            list_result = list_abac_policies(
+            list_result = list_fgac_policies(
                 securable_type="SCHEMA",
                 securable_fullname=full_schema,
             )
@@ -592,12 +824,23 @@ class TestAbacPolicyCRUD:
             assert policy_name in policy_names, f"Expected {policy_name} in {policy_names}"
             logger.info(f"Policy found in list ({list_result['policy_count']} total)")
 
-            # --- DELETE ---
-            logger.info(f"Deleting policy: {policy_name}")
-            delete_result = delete_abac_policy(
+            # --- PREVIEW DELETE ---
+            logger.info(f"Previewing delete for: {policy_name}")
+            delete_preview = preview_policy_changes(
+                action="DELETE",
                 policy_name=policy_name,
                 securable_type="SCHEMA",
                 securable_fullname=full_schema,
+            )
+            delete_token = delete_preview["approval_token"]
+
+            # --- DELETE ---
+            logger.info(f"Deleting policy: {policy_name}")
+            delete_result = delete_fgac_policy(
+                policy_name=policy_name,
+                securable_type="SCHEMA",
+                securable_fullname=full_schema,
+                approval_token=delete_token,
             )
 
             assert delete_result["success"] is True
@@ -654,9 +897,25 @@ class TestAbacPolicyCRUD:
             )
             logger.info(f"Tagged column department with {tag_key}={tag_value}")
 
+            # Preview create
+            logger.info(f"Previewing row filter policy creation: {policy_name}")
+            create_preview = preview_policy_changes(
+                action="CREATE",
+                policy_name=policy_name,
+                securable_type="SCHEMA",
+                securable_fullname=full_schema,
+                policy_type="ROW_FILTER",
+                to_principals=["account users"],
+                function_name=fn_name,
+                tag_name=tag_key,
+                tag_value=tag_value,
+                comment=f"Test row filter {unique_name}",
+            )
+            create_token = create_preview["approval_token"]
+
             # Create row filter policy
             logger.info(f"Creating row filter policy: {policy_name}")
-            result = create_abac_policy(
+            result = create_fgac_policy(
                 policy_name=policy_name,
                 policy_type="ROW_FILTER",
                 securable_type="SCHEMA",
@@ -664,6 +923,7 @@ class TestAbacPolicyCRUD:
                 function_name=fn_name,
                 to_principals=["account users"],
                 tag_name=tag_key,
+                approval_token=create_token,
                 tag_value=tag_value,
                 comment=f"Test row filter {unique_name}",
             )
@@ -673,11 +933,21 @@ class TestAbacPolicyCRUD:
             assert result["details"]["policy_type"] == "ROW_FILTER"
             logger.info(f"Row filter policy created: {result['details']}")
 
-            # Delete policy
-            delete_abac_policy(
+            # Preview delete
+            delete_preview = preview_policy_changes(
+                action="DELETE",
                 policy_name=policy_name,
                 securable_type="SCHEMA",
                 securable_fullname=full_schema,
+            )
+            delete_token = delete_preview["approval_token"]
+
+            # Delete policy
+            delete_fgac_policy(
+                policy_name=policy_name,
+                securable_type="SCHEMA",
+                securable_fullname=full_schema,
+                approval_token=delete_token,
             )
             logger.info("Row filter policy deleted")
 

@@ -235,14 +235,14 @@ def cleanup_functions():
 @pytest.fixture(scope="function")
 def cleanup_policies():
     """
-    Track and cleanup ABAC policies created during tests.
+    Track and cleanup FGAC policies created during tests.
 
     Usage:
         def test_create_policy(cleanup_policies):
-            create_abac_policy(...)
+            create_fgac_policy(...)
             cleanup_policies((policy_name, securable_type, securable_fullname))
     """
-    from databricks_tools_core.unity_catalog import delete_abac_policy
+    from databricks_tools_core.auth import get_workspace_client
 
     policies_to_cleanup = []
 
@@ -254,13 +254,15 @@ def cleanup_policies():
 
     yield register
 
+    # Use SDK directly to bypass approval token guardrails during cleanup
+    w = get_workspace_client()
     for name, stype, sfullname in policies_to_cleanup:
         try:
             logger.info(f"Cleaning up policy: {name}")
-            delete_abac_policy(
-                policy_name=name,
-                securable_type=stype,
-                securable_fullname=sfullname,
+            w.policies.delete_policy(
+                on_securable_type=stype,
+                on_securable_fullname=sfullname,
+                name=name,
             )
         except Exception as e:
             logger.warning(f"Failed to cleanup policy {name}: {e}")
