@@ -1,6 +1,9 @@
 # Databricks AI Dev Kit
 .ai-dev-kit/
 
+# Claude Code local skills (installed via install_skills.sh)
+.claude/
+
 
 # Python
 __pycache__/
@@ -69,6 +72,3 @@ databricks-tools-core/tests/integration/pdf/generated_pdf/
 # Python cache
 __pycache__/
 windows_info.txt
-
-# Local review notes
-COMMIT_REVIEW.md
