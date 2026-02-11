@@ -25,27 +25,12 @@ customers_history
 ├── customer_name
 ├── email
 ├── phone
-<<<<<<< HEAD:databricks-skills/spark-declarative-pipelines/3-scd-patterns.md
 ├── __START_AT         -- When this version became effective (auto-generated)
 ├── __END_AT           -- When this version expired (NULL for current)
 └── ...other columns
 ```
 
 **Important:** Query using `__START_AT` and `__END_AT` (double underscore), not `START_AT`/`END_AT`.
-=======
-├── __START_AT        -- When this version became effective (auto-generated)
-├── __END_AT          -- When this version expired (NULL for current)
-└── ...other columns
-```
-
-**IMPORTANT: Column Naming Convention**
-
-AUTO CDC creates temporal columns with **double underscores**:
-- `__START_AT` - When this version became effective
-- `__END_AT` - When this version expired (NULL for current)
-
-Do NOT use single underscore (`_START_AT`, `_END_AT`) or no underscore (`START_AT`, `END_AT`) - queries will fail.
->>>>>>> cb8c828 (Add clarity on ingeestion, scd, and project init):databricks-skills/spark-declarative-pipelines/3-scd-query-patterns.md
 
 ---
 
@@ -54,11 +39,7 @@ Do NOT use single underscore (`_START_AT`, `_END_AT`) or no underscore (`START_A
 ### All Current Records
 
 ```sql
-<<<<<<< HEAD:databricks-skills/spark-declarative-pipelines/3-scd-patterns.md
 -- __END_AT IS NULL indicates active record (Lakeflow uses double underscore)
-=======
--- __END_AT IS NULL indicates active record
->>>>>>> cb8c828 (Add clarity on ingeestion, scd, and project init):databricks-skills/spark-declarative-pipelines/3-scd-query-patterns.md
 CREATE OR REPLACE MATERIALIZED VIEW dim_customers_current AS
 SELECT
   customer_id, customer_name, email, phone, address,
@@ -219,11 +200,7 @@ GROUP BY product_id;
 
 ## Best Practices
 
-<<<<<<< HEAD:databricks-skills/spark-declarative-pipelines/3-scd-patterns.md
 ### 1. Always Filter by __END_AT for Current (Lakeflow uses double underscore)
-=======
-### 1. Always Filter by __END_AT for Current
->>>>>>> cb8c828 (Add clarity on ingeestion, scd, and project init):databricks-skills/spark-declarative-pipelines/3-scd-query-patterns.md
 
 ```sql
 -- ✅ Efficient
