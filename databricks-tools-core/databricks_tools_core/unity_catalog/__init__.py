@@ -112,17 +112,17 @@ from .security_policies import (
     drop_column_mask,
 )
 
-# ABAC policies
-from .abac_policies import (
-    list_abac_policies,
-    get_abac_policy,
+# FGAC policies
+from .fgac_policies import (
+    list_fgac_policies,
+    get_fgac_policy,
     get_table_policies,
     get_masking_functions,
     check_policy_quota,
     preview_policy_changes,
-    create_abac_policy,
-    update_abac_policy,
-    delete_abac_policy,
+    create_fgac_policy,
+    update_fgac_policy,
+    delete_fgac_policy,
 )
 
 # Quality monitors
@@ -239,16 +239,16 @@ __all__ = [
     "drop_row_filter",
     "set_column_mask",
     "drop_column_mask",
-    # ABAC policies
-    "list_abac_policies",
-    "get_abac_policy",
+    # FGAC policies
+    "list_fgac_policies",
+    "get_fgac_policy",
     "get_table_policies",
     "get_masking_functions",
     "check_policy_quota",
     "preview_policy_changes",
-    "create_abac_policy",
-    "update_abac_policy",
-    "delete_abac_policy",
+    "create_fgac_policy",
+    "update_fgac_policy",
+    "delete_fgac_policy",
     # Quality monitors
     "create_monitor",
     "get_monitor",
