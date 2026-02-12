@@ -2,9 +2,6 @@
 .ai-dev-kit/
 .claude/
 
-# Claude Code local skills (installed via install_skills.sh)
-.claude/
-
 
 # Python
 __pycache__/
