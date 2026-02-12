@@ -1004,3 +1004,272 @@ test_cases:
       difficulty: "medium"
       source: "manual"
       tags: ["mcp", "discovery", "column-tags", "schema-info", "table-policies"]
+
+  # ============================================================================
+  # UC ACLs — Read-Only Access Pattern
+  # ============================================================================
+  - id: "uc_acl_read_only_001"
+    inputs:
+      prompt: "Grant the data_readers group read-only access to the analytics.gold schema"
+    outputs:
+      response: |
+        Here's how to grant read-only access to a schema:
+
+        ```sql
+        -- Step 1: Grant catalog access (required to see anything inside)
+        GRANT USE CATALOG ON CATALOG analytics TO `data_readers`;
+
+        -- Step 2: Grant schema access
+        GRANT USE SCHEMA ON SCHEMA analytics.gold TO `data_readers`;
+
+        -- Step 3: Grant SELECT on all tables in the schema
+        GRANT SELECT ON SCHEMA analytics.gold TO `data_readers`;
+        ```
+
+        Key points:
+        - `USE CATALOG` is required before any schema-level access
+        - `USE SCHEMA` is required before any table-level access
+        - `SELECT` at schema level applies to all current and future tables in the schema
+        - Grant to **groups**, not individual users — easier to manage and audit
+
+        To verify the grants:
+        ```sql
+        SHOW GRANTS ON SCHEMA analytics.gold;
+        ```
+      execution_success: null
+    expectations:
+      expected_facts:
+        - "USE CATALOG"
+        - "USE SCHEMA"
+        - "SELECT"
+        - "GRANT"
+      expected_patterns:
+        - pattern: "GRANT USE CATALOG"
+          min_count: 1
+          description: "catalog access grant"
+        - pattern: "GRANT USE SCHEMA"
+          min_count: 1
+          description: "schema access grant"
+        - pattern: "GRANT SELECT"
+          min_count: 1
+          description: "read access grant"
+        - pattern: "data_readers"
+          min_count: 2
+          description: "principal group reference"
+      guidelines:
+        - "Must include USE CATALOG, USE SCHEMA, and SELECT grants"
+        - "Must use group name, not individual user"
+        - "Should explain privilege inheritance"
+        - "Should show how to verify grants"
+    metadata:
+      category: "happy_path"
+      difficulty: "easy"
+      source: "manual"
+      tags: ["sql", "acl", "grant", "read-only", "schema"]
+
+  # ============================================================================
+  # UC ACLs — Data Engineer Access Pattern
+  # ============================================================================
+  - id: "uc_acl_data_engineer_001"
+    inputs:
+      prompt: "Set up data engineer access to the analytics.silver schema with read, write, and create table privileges"
+    outputs:
+      response: |
+        Here's how to set up data engineer access with read, write, and create table privileges:
+
+        ```sql
+        -- Catalog access
+        GRANT USE CATALOG ON CATALOG analytics TO `data_engineers`;
+
+        -- Schema access
+        GRANT USE SCHEMA ON SCHEMA analytics.silver TO `data_engineers`;
+
+        -- Read access
+        GRANT SELECT ON SCHEMA analytics.silver TO `data_engineers`;
+
+        -- Write access (insert, update, delete)
+        GRANT MODIFY ON SCHEMA analytics.silver TO `data_engineers`;
+
+        -- Create new tables
+        GRANT CREATE TABLE ON SCHEMA analytics.silver TO `data_engineers`;
+        ```
+
+        Key points:
+        - `MODIFY` allows INSERT, UPDATE, DELETE operations on tables
+        - `CREATE TABLE` allows creating new tables and views in the schema
+        - Granting at schema level covers all current and future tables
+        - For volume access, add `GRANT CREATE VOLUME` and `GRANT WRITE VOLUME` separately
+
+        To verify:
+        ```sql
+        SHOW GRANTS ON SCHEMA analytics.silver;
+        ```
+      execution_success: null
+    expectations:
+      expected_facts:
+        - "USE CATALOG"
+        - "USE SCHEMA"
+        - "SELECT"
+        - "MODIFY"
+        - "CREATE TABLE"
+      expected_patterns:
+        - pattern: "GRANT USE CATALOG"
+          min_count: 1
+          description: "catalog access"
+        - pattern: "GRANT MODIFY"
+          min_count: 1
+          description: "write access"
+        - pattern: "GRANT CREATE TABLE"
+          min_count: 1
+          description: "table creation privilege"
+      guidelines:
+        - "Must include USE CATALOG, USE SCHEMA, SELECT, MODIFY, and CREATE TABLE"
+        - "Must explain what MODIFY allows (insert, update, delete)"
+        - "Should mention schema-level grants cover all tables"
+    metadata:
+      category: "happy_path"
+      difficulty: "easy"
+      source: "manual"
+      tags: ["sql", "acl", "grant", "data-engineer", "schema"]
+
+  # ============================================================================
+  # UC ACLs — Revoke and Show Grants
+  # ============================================================================
+  - id: "uc_acl_revoke_001"
+    inputs:
+      prompt: "Revoke write access from the contractors group on analytics.silver and show remaining grants"
+    outputs:
+      response: |
+        Here's how to revoke write access and verify the remaining grants:
+
+        ```sql
+        -- Revoke write access
+        REVOKE MODIFY ON SCHEMA analytics.silver FROM `contractors`;
+
+        -- Optionally also revoke CREATE TABLE if they shouldn't create new tables
+        REVOKE CREATE TABLE ON SCHEMA analytics.silver FROM `contractors`;
+
+        -- Verify remaining grants
+        SHOW GRANTS ON SCHEMA analytics.silver;
+
+        -- Check grants for specific principal
+        SHOW GRANTS `contractors` ON SCHEMA analytics.silver;
+        ```
+
+        Key points:
+        - `REVOKE` removes only the specified privilege — other grants remain
+        - `SHOW GRANTS` lists all grants on the securable
+        - `SHOW GRANTS <principal>` filters to a specific user or group
+        - To fully remove access, revoke `USE SCHEMA` and `USE CATALOG` as well
+      execution_success: null
+    expectations:
+      expected_facts:
+        - "REVOKE"
+        - "MODIFY"
+        - "SHOW GRANTS"
+      expected_patterns:
+        - pattern: "REVOKE MODIFY"
+          min_count: 1
+          description: "revoke write access"
+        - pattern: "SHOW GRANTS"
+          min_count: 1
+          description: "verify grants"
+        - pattern: "FROM `contractors`"
+          min_count: 1
+          description: "revoke from correct principal"
+      guidelines:
+        - "Must use REVOKE with FROM syntax"
+        - "Must show how to verify remaining grants with SHOW GRANTS"
+        - "Should explain that REVOKE only removes the specified privilege"
+    metadata:
+      category: "happy_path"
+      difficulty: "easy"
+      source: "manual"
+      tags: ["sql", "acl", "revoke", "show-grants"]
+
+  # ============================================================================
+  # UC ACLs — SDK Grant/Revoke
+  # ============================================================================
+  - id: "uc_acl_sdk_001"
+    inputs:
+      prompt: "Grant SELECT on a table to a group using the Python SDK"
+    outputs:
+      response: |
+        Here's how to grant SELECT on a table using the Databricks Python SDK:
+
+        ```python
+        from databricks.sdk import WorkspaceClient
+
+        w = WorkspaceClient()
+
+        # Grant SELECT to data_readers
+        w.grants.update(
+            securable_type="TABLE",
+            full_name="my_catalog.my_schema.my_table",
+            changes=[{
+                "principal": "data_readers",
+                "add": ["SELECT"],
+            }]
+        )
+        ```
+
+        To verify the grant:
+
+        ```python
+        # Get current grants
+        grants = w.grants.get(
+            securable_type="TABLE",
+            full_name="my_catalog.my_schema.my_table"
+        )
+        for assignment in grants.privilege_assignments:
+            print(f"{assignment.principal}: {assignment.privileges}")
+        ```
+
+        To revoke:
+
+        ```python
+        w.grants.update(
+            securable_type="TABLE",
+            full_name="my_catalog.my_schema.my_table",
+            changes=[{
+                "principal": "data_readers",
+                "remove": ["SELECT"],
+            }]
+        )
+        ```
+
+        Key points:
+        - `w.grants.update()` handles both grant (via `add`) and revoke (via `remove`)
+        - `securable_type` can be `"CATALOG"`, `"SCHEMA"`, `"TABLE"`, `"VOLUME"`, `"FUNCTION"`
+        - `w.grants.get()` returns current grants; `w.grants.get_effective()` includes inherited
+      execution_success: null
+    expectations:
+      expected_facts:
+        - "w.grants.update"
+        - "securable_type"
+        - "principal"
+        - "add"
+        - "SELECT"
+      expected_patterns:
+        - pattern: "w\\.grants\\.update\\("
+          min_count: 1
+          description: "SDK grant update call"
+        - pattern: '"add".*\\[.*"SELECT".*\\]'
+          min_count: 1
+          description: "add SELECT privilege"
+        - pattern: "securable_type.*TABLE"
+          min_count: 1
+          description: "securable type specified"
+        - pattern: "w\\.grants\\.get\\("
+          min_count: 1
+          description: "verify grants"
+      guidelines:
+        - "Must use w.grants.update() with add list"
+        - "Must specify securable_type and full_name"
+        - "Should show how to verify grants with w.grants.get()"
+        - "Should show how to revoke with remove list"
+    metadata:
+      category: "happy_path"
+      difficulty: "medium"
+      source: "manual"
+      tags: ["python", "sdk", "acl", "grant", "table"]

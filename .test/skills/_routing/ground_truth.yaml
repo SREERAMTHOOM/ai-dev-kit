@@ -147,6 +147,40 @@ test_cases:
       difficulty: "medium"
       reasoning: "Mentions 'CREATE POLICY' and 'hasTagValue' - UC FGAC governance"
 
+  # Single-skill routing - UC ACLs
+  - id: "routing_acl_001"
+    inputs:
+      prompt: "Grant SELECT access on a table to the data_readers group"
+    expectations:
+      expected_skills: ["databricks-unity-catalog"]
+      is_multi_skill: false
+    metadata:
+      category: "single_skill"
+      difficulty: "easy"
+      reasoning: "Mentions 'Grant SELECT' - UC ACL operation"
+
+  - id: "routing_acl_002"
+    inputs:
+      prompt: "How do I revoke write permissions from a group on a schema?"
+    expectations:
+      expected_skills: ["databricks-unity-catalog"]
+      is_multi_skill: false
+    metadata:
+      category: "single_skill"
+      difficulty: "easy"
+      reasoning: "Mentions 'revoke' and 'permissions' on 'schema' - UC ACL operation"
+
+  - id: "routing_acl_003"
+    inputs:
+      prompt: "Set up read-only access for the analytics team on the gold schema"
+    expectations:
+      expected_skills: ["databricks-unity-catalog"]
+      is_multi_skill: false
+    metadata:
+      category: "single_skill"
+      difficulty: "medium"
+      reasoning: "Access setup on schema with role-based pattern - UC ACL operation"
+
   # Multi-skill routing
   - id: "routing_multi_001"
     inputs:
