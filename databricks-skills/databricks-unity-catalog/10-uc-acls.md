@@ -128,32 +128,33 @@ ALTER VOLUME my_catalog.my_schema.my_volume OWNER TO `new_owner`;
 
 ```python
 from databricks.sdk import WorkspaceClient
+from databricks.sdk.service.catalog import Privilege, PermissionsChange, SecurableType
 
 w = WorkspaceClient()
 
 # Grant privileges
 w.grants.update(
-    securable_type="TABLE",
+    securable_type=SecurableType.TABLE,
     full_name="my_catalog.my_schema.my_table",
-    changes=[{
-        "principal": "data_readers",
-        "add": ["SELECT"],
-    }]
+    changes=[PermissionsChange(
+        principal="data_readers",
+        add=[Privilege.SELECT],
+    )]
 )
 
 # Revoke privileges
 w.grants.update(
-    securable_type="TABLE",
+    securable_type=SecurableType.TABLE,
     full_name="my_catalog.my_schema.my_table",
-    changes=[{
-        "principal": "data_readers",
-        "remove": ["SELECT"],
-    }]
+    changes=[PermissionsChange(
+        principal="data_readers",
+        remove=[Privilege.SELECT],
+    )]
 )
 
 # Get current grants
 grants = w.grants.get(
-    securable_type="TABLE",
+    securable_type=SecurableType.TABLE,
     full_name="my_catalog.my_schema.my_table"
 )
 for assignment in grants.privilege_assignments:
@@ -161,7 +162,7 @@ for assignment in grants.privilege_assignments:
 
 # Get effective grants (includes inherited)
 effective = w.grants.get_effective(
-    securable_type="TABLE",
+    securable_type=SecurableType.TABLE,
     full_name="my_catalog.my_schema.my_table",
     principal="data_readers"
 )

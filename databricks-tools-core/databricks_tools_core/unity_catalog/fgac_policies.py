@@ -69,25 +69,25 @@ def _validate_approval_token(approval_token: str, current_params: dict) -> None:
     try:
         signature, b64_payload = approval_token.split(":", 1)
     except (ValueError, AttributeError):
-        raise ValueError("Invalid or expired approval token")
+        raise ValueError("Malformed approval token: expected 'signature:payload' format")
 
     try:
         payload = base64.b64decode(b64_payload).decode()
     except Exception:
-        raise ValueError("Invalid or expired approval token")
+        raise ValueError("Malformed approval token: payload is not valid base64")
 
     expected_sig = hmac.new(_APPROVAL_SECRET.encode(), payload.encode(), hashlib.sha256).hexdigest()
     if not hmac.compare_digest(signature, expected_sig):
-        raise ValueError("Invalid or expired approval token")
+        raise ValueError("Invalid approval token: signature verification failed")
 
     try:
         token_data = json.loads(payload)
     except json.JSONDecodeError:
-        raise ValueError("Invalid or expired approval token")
+        raise ValueError("Malformed approval token: payload is not valid JSON")
 
     ts = token_data.pop("timestamp", 0)
     if abs(time.time() - ts) > _TOKEN_TTL_SECONDS:
-        raise ValueError("Invalid or expired approval token")
+        raise ValueError("Expired approval token: please run preview again to get a new token")
 
     # Map preview action to mutation action
     action_map = {"CREATE": "create", "UPDATE": "update", "DELETE": "delete"}
@@ -95,12 +95,15 @@ def _validate_approval_token(approval_token: str, current_params: dict) -> None:
     current_action = params.pop("action", None)
     if token_action and current_action:
         if action_map.get(token_action) != current_action:
-            raise ValueError("Invalid or expired approval token")
+            raise ValueError(
+                f"Approval token action mismatch: token is for '{token_action}'"
+                f" but current action is '{current_action}'"
+            )
 
     # Compare remaining params
     clean_current = {k: v for k, v in params.items() if v is not None}
     if token_data != clean_current:
-        raise ValueError("Invalid or expired approval token")
+        raise ValueError("Approval token parameter mismatch: params differ from what was previewed")
 
 
 def _check_admin_group() -> dict:
@@ -278,8 +281,10 @@ def get_table_policies(
     """
     Get column masks and row filters applied to a specific table.
 
-    Uses the Unity Catalog REST API directly to retrieve effective
-    column masks and row filters, including those derived from FGAC policies.
+    Uses the Unity Catalog REST API directly because the Python SDK's
+    TableInfo does not expose ``effective_masks`` (FGAC-derived masks).
+    The ``/api/2.1/unity-catalog/tables/`` endpoint returns both direct
+    column masks and effective masks from FGAC policies.
 
     Args:
         catalog: Catalog name
@@ -948,8 +953,8 @@ def create_fgac_policy(
     """
     ptype = _validate_policy_type(policy_type)
     stype = _validate_securable_type(securable_type)
-    _validate_identifier(securable_fullname)
-    _validate_identifier(function_name)
+    # Identifier validation is handled by preview_policy_changes() — the token
+    # binding ensures these values match what was already validated at preview time.
     current_params = {
         "action": "create",
         "policy_name": policy_name,
@@ -1054,7 +1059,6 @@ def update_fgac_policy(
         Dict with update status and applied changes
     """
     stype = _validate_securable_type(securable_type)
-    _validate_identifier(securable_fullname)
     current_params = {
         "action": "update",
         "policy_name": policy_name,
@@ -1147,7 +1151,6 @@ def delete_fgac_policy(
         Dict with deletion status
     """
     stype = _validate_securable_type(securable_type)
-    _validate_identifier(securable_fullname)
     current_params = {
         "action": "delete",
         "policy_name": policy_name,

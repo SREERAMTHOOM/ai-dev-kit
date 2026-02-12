@@ -1006,6 +1006,446 @@ test_cases:
       tags: ["mcp", "discovery", "column-tags", "schema-info", "table-policies"]
 
   # ============================================================================
+  # SQL Generation — Tag Application
+  # ============================================================================
+  - id: "fgac_tag_application_sql_001"
+    inputs:
+      prompt: "Apply PII governed tags to columns on my customers table"
+    outputs:
+      response: |
+        Here's how to apply governed tags to columns:
+
+        ```sql
+        -- Modern syntax (DBR 16.1+)
+        SET TAG ON COLUMN my_catalog.my_schema.customers.ssn 'pii_type' = 'ssn';
+        SET TAG ON COLUMN my_catalog.my_schema.customers.email 'pii_type' = 'email';
+        SET TAG ON COLUMN my_catalog.my_schema.customers.phone 'pii_type' = 'phone';
+
+        -- Legacy syntax (all versions)
+        ALTER TABLE my_catalog.my_schema.customers
+        ALTER COLUMN ssn SET TAGS ('pii_type' = 'ssn');
+        ```
+
+        To verify tags were applied:
+        ```sql
+        SELECT tag_name, tag_value, column_name
+        FROM system.information_schema.column_tags
+        WHERE catalog_name = 'my_catalog'
+          AND schema_name = 'my_schema'
+          AND table_name = 'customers';
+        ```
+
+        Important: Tags must be **governed tags** (created via the Databricks UI, not SQL).
+      execution_success: null
+    expectations:
+      expected_facts:
+        - "SET TAG"
+        - "pii_type"
+        - "governed tags"
+      expected_patterns:
+        - pattern: "SET TAG|SET TAGS"
+          min_count: 1
+          description: "tag application syntax"
+        - pattern: "pii_type"
+          min_count: 2
+          description: "PII tag key usage"
+        - pattern: "column_tags"
+          min_count: 1
+          description: "information_schema query for verification"
+      guidelines:
+        - "Must use SET TAG ON COLUMN or ALTER TABLE ALTER COLUMN SET TAGS syntax"
+        - "Must mention governed tags cannot be created via SQL"
+        - "Should show how to verify tags via information_schema"
+    metadata:
+      category: "happy_path"
+      difficulty: "easy"
+      source: "manual"
+      tags: ["sql", "tags", "column-tags", "pii"]
+
+  # ============================================================================
+  # SQL Generation — Drop Policy
+  # ============================================================================
+  - id: "fgac_drop_policy_sql_001"
+    inputs:
+      prompt: "Drop an FGAC policy from a schema"
+    outputs:
+      response: |
+        Here's how to drop an FGAC policy:
+
+        ```sql
+        -- Drop at schema level
+        DROP POLICY mask_pii_schema ON SCHEMA my_catalog.my_schema;
+
+        -- Drop at catalog level
+        DROP POLICY mask_pii_catalog ON CATALOG my_catalog;
+
+        -- Drop at table level
+        DROP POLICY mask_pii_table ON TABLE my_catalog.my_schema.my_table;
+        ```
+
+        Important notes:
+        - `DROP POLICY` is **irreversible** — the policy is permanently removed
+        - There is no `ALTER POLICY` — to change a policy, drop and recreate it
+        - Use `preview_policy_changes(action="DELETE", ...)` for the human-in-the-loop workflow
+      execution_success: null
+    expectations:
+      expected_facts:
+        - "DROP POLICY"
+        - "irreversible"
+      expected_patterns:
+        - pattern: "DROP POLICY"
+          min_count: 1
+          description: "drop policy syntax"
+        - pattern: "ON (SCHEMA|CATALOG|TABLE)"
+          min_count: 1
+          description: "scope specifier"
+      guidelines:
+        - "Must use DROP POLICY ... ON <scope> syntax"
+        - "Must warn that the operation is irreversible"
+        - "Must mention ALTER POLICY does not exist"
+    metadata:
+      category: "happy_path"
+      difficulty: "easy"
+      source: "manual"
+      tags: ["sql", "drop-policy", "delete"]
+
+  # ============================================================================
+  # Error/Edge Cases — Governed Tags Cannot Be Created via SQL
+  # ============================================================================
+  - id: "fgac_error_governed_tags_001"
+    inputs:
+      prompt: "How do I create a governed tag using SQL?"
+    outputs:
+      response: |
+        **Governed tags cannot be created via SQL.** They must be created through the Databricks UI.
+
+        To create a governed tag:
+        1. Navigate to **Catalog** in your workspace
+        2. Select **Governed Tags** from the left panel
+        3. Click **Create governed tag**
+        4. Configure the tag key and allowed values
+
+        Example configuration:
+        - **Tag Key**: `pii_type`
+        - **Allowed Values**: `ssn`, `email`, `phone`, `credit_card`
+
+        Once the governed tag exists, you can **apply** it to columns via SQL:
+        ```sql
+        SET TAG ON COLUMN catalog.schema.table.column 'pii_type' = 'ssn';
+        ```
+      execution_success: null
+    expectations:
+      expected_facts:
+        - "cannot be created via SQL"
+        - "Databricks UI"
+        - "Governed Tags"
+      expected_patterns:
+        - pattern: "cannot.*SQL|not.*SQL|UI"
+          min_count: 1
+          description: "explains SQL limitation"
+        - pattern: "SET TAG"
+          min_count: 1
+          description: "shows SQL tag application as alternative"
+      guidelines:
+        - "Must clearly state governed tags cannot be created via SQL"
+        - "Must describe the UI workflow for creating governed tags"
+        - "Should show how to apply tags via SQL after creation"
+    metadata:
+      category: "error_handling"
+      difficulty: "easy"
+      source: "manual"
+      tags: ["error", "governed-tags", "ui-only"]
+
+  # ============================================================================
+  # SQL Generation — hasTag vs hasTagValue
+  # ============================================================================
+  - id: "fgac_has_tag_vs_value_001"
+    inputs:
+      prompt: "What is the difference between hasTag and hasTagValue in FGAC policies?"
+    outputs:
+      response: |
+        `hasTag` and `hasTagValue` are used in FGAC policies to match columns based on governed tags:
+
+        **`hasTagValue('tag_name', 'tag_value')`** — Matches columns with a specific tag AND value:
+        ```sql
+        MATCH COLUMNS hasTagValue('pii_type', 'ssn') AS masked_col
+        ```
+        This only matches columns tagged with `pii_type = ssn`.
+
+        **`hasTag('tag_name')`** — Matches columns with a specific tag, regardless of value:
+        ```sql
+        MATCH COLUMNS hasTag('pii_type') AS masked_col
+        ```
+        This matches ALL columns tagged with `pii_type`, regardless of whether the value is `ssn`, `email`, `phone`, etc.
+
+        Best practices:
+        - Use `hasTagValue` when different tag values need different masking (e.g., SSN mask vs email mask)
+        - Use `hasTag` when all values should be masked the same way (e.g., full redaction for any PII)
+      execution_success: null
+    expectations:
+      expected_facts:
+        - "hasTag"
+        - "hasTagValue"
+        - "regardless of value"
+      expected_patterns:
+        - pattern: "hasTagValue\\s*\\("
+          min_count: 1
+          description: "hasTagValue example"
+        - pattern: "hasTag\\s*\\("
+          min_count: 1
+          description: "hasTag example"
+        - pattern: "MATCH COLUMNS"
+          min_count: 2
+          description: "both match patterns shown"
+      guidelines:
+        - "Must explain the difference between hasTag and hasTagValue"
+        - "Must show SQL examples for both"
+        - "Should explain when to use each"
+    metadata:
+      category: "happy_path"
+      difficulty: "easy"
+      source: "manual"
+      tags: ["sql", "has-tag", "tag-matching", "fgac"]
+
+  # ============================================================================
+  # MCP Tool — Delete Policy Workflow
+  # ============================================================================
+  - id: "fgac_mcp_delete_workflow_001"
+    inputs:
+      prompt: "Delete an FGAC policy using the human-in-the-loop MCP workflow"
+    outputs:
+      response: |
+        Here's the human-in-the-loop workflow for deleting an FGAC policy:
+
+        **Step 1: PREVIEW** — Get a delete preview and approval token
+
+        ```
+        result = preview_policy_changes(
+            action="DELETE",
+            policy_name="mask_ssn_finance",
+            securable_type="SCHEMA",
+            securable_fullname="prod.finance"
+        )
+        ```
+
+        This returns:
+        - `equivalent_sql`: `DROP POLICY mask_ssn_finance ON SCHEMA prod.finance;`
+        - `warnings`: ["This action is irreversible. The policy will be permanently removed."]
+        - `approval_token`: Token to authorize the deletion
+
+        **Step 2: APPROVE** — Human reviews the preview and confirms
+
+        **Step 3: EXECUTE** — Delete with the approval token
+
+        ```
+        delete_fgac_policy(
+            policy_name="mask_ssn_finance",
+            securable_type="SCHEMA",
+            securable_fullname="prod.finance",
+            approval_token=result["approval_token"]
+        )
+        ```
+
+        The approval token ensures the deletion matches exactly what was previewed.
+      execution_success: null
+    expectations:
+      expected_facts:
+        - "preview_policy_changes"
+        - "DELETE"
+        - "delete_fgac_policy"
+        - "approval_token"
+        - "irreversible"
+      expected_patterns:
+        - pattern: 'action.*=.*"DELETE"'
+          min_count: 1
+          description: "DELETE action in preview"
+        - pattern: "delete_fgac_policy\\("
+          min_count: 1
+          description: "delete execution step"
+        - pattern: "approval_token"
+          min_count: 2
+          description: "token in both preview and execute"
+      guidelines:
+        - "Must use preview_policy_changes with action=DELETE first"
+        - "Must pass approval_token to delete_fgac_policy"
+        - "Must warn the action is irreversible"
+    metadata:
+      category: "happy_path"
+      difficulty: "medium"
+      source: "manual"
+      tags: ["mcp", "delete", "workflow", "human-in-the-loop"]
+
+  # ============================================================================
+  # SQL Generation — Catalog-Scope Policy
+  # ============================================================================
+  - id: "fgac_catalog_scope_sql_001"
+    inputs:
+      prompt: "Create a column mask policy at catalog level to mask all PII across the entire catalog"
+    outputs:
+      response: |
+        Here's a catalog-level column mask policy:
+
+        ```sql
+        CREATE OR REPLACE POLICY mask_pii_catalog
+        ON CATALOG my_catalog
+        COMMENT 'Mask PII columns catalog-wide'
+        COLUMN MASK my_catalog.governance.mask_full
+        TO `analysts`, `data_scientists`
+        EXCEPT `gov_admin`
+        FOR TABLES
+        MATCH COLUMNS hasTag('pii_type') AS masked_col
+        ON COLUMN masked_col;
+        ```
+
+        Key points:
+        - `ON CATALOG` applies the policy to ALL tables in ALL schemas within the catalog
+        - Uses `hasTag('pii_type')` (without value) to match any PII column regardless of type
+        - Policy quotas: max 10 policies per catalog
+        - `EXCEPT `gov_admin`` protects admin access
+      execution_success: null
+    expectations:
+      expected_facts:
+        - "ON CATALOG"
+        - "COLUMN MASK"
+        - "FOR TABLES"
+        - "EXCEPT `gov_admin`"
+      expected_patterns:
+        - pattern: "ON CATALOG"
+          min_count: 1
+          description: "catalog scope"
+        - pattern: "COLUMN MASK"
+          min_count: 1
+          description: "column mask type"
+        - pattern: "EXCEPT\\s+`gov_admin`"
+          min_count: 1
+          description: "admin exclusion"
+      guidelines:
+        - "Must use ON CATALOG scope"
+        - "Must include EXCEPT `gov_admin`"
+        - "Must include FOR TABLES"
+        - "Should mention catalog-level policy quotas"
+    metadata:
+      category: "happy_path"
+      difficulty: "medium"
+      source: "manual"
+      tags: ["sql", "column-mask", "catalog-scope"]
+
+  # ============================================================================
+  # Error/Edge Cases — Policy Quota
+  # ============================================================================
+  - id: "fgac_error_quota_001"
+    inputs:
+      prompt: "I'm getting POLICY_QUOTA_EXCEEDED when creating a policy on my table. How do I fix this?"
+    outputs:
+      response: |
+        The `POLICY_QUOTA_EXCEEDED` error means you've reached the maximum number of policies on that securable.
+
+        **Policy quotas:**
+        | Scope | Max Policies |
+        |-------|-------------|
+        | Per Catalog | 10 |
+        | Per Schema | 10 |
+        | Per Table | 5 |
+
+        **How to fix:**
+
+        1. **Check current quota** using MCP:
+        ```
+        check_policy_quota(
+            securable_type="TABLE",
+            securable_fullname="my_catalog.my_schema.my_table"
+        )
+        ```
+
+        2. **Consolidate policies** — Combine multiple policies that use the same UDF into one with broader tag matching (`hasTag` instead of multiple `hasTagValue` policies)
+
+        3. **Move to broader scope** — Instead of 5 table-level policies, create 1 schema-level policy
+
+        4. **Remove unused policies**:
+        ```sql
+        DROP POLICY old_policy_name ON TABLE my_catalog.my_schema.my_table;
+        ```
+      execution_success: null
+    expectations:
+      expected_facts:
+        - "POLICY_QUOTA_EXCEEDED"
+        - "10"
+        - "5"
+        - "check_policy_quota"
+      expected_patterns:
+        - pattern: "10"
+          min_count: 1
+          description: "catalog/schema quota"
+        - pattern: "5"
+          min_count: 1
+          description: "table quota"
+        - pattern: "check_policy_quota|consolidat|broader scope"
+          min_count: 1
+          description: "solution recommendation"
+      guidelines:
+        - "Must list quota limits for all three scopes"
+        - "Must suggest consolidation or broader scope as solutions"
+        - "Should show check_policy_quota MCP tool"
+    metadata:
+      category: "error_handling"
+      difficulty: "medium"
+      source: "manual"
+      tags: ["error", "quota", "policy-limits"]
+
+  # ============================================================================
+  # UC ACLs — Ownership Transfer
+  # ============================================================================
+  - id: "uc_acl_ownership_001"
+    inputs:
+      prompt: "Transfer ownership of a schema to a new group"
+    outputs:
+      response: |
+        Here's how to transfer ownership of a schema:
+
+        ```sql
+        ALTER SCHEMA my_catalog.my_schema OWNER TO `platform_team`;
+        ```
+
+        You can also transfer ownership of other securables:
+        ```sql
+        -- Catalog ownership
+        ALTER CATALOG my_catalog OWNER TO `platform_team`;
+
+        -- Table ownership
+        ALTER TABLE my_catalog.my_schema.my_table OWNER TO `platform_team`;
+
+        -- Volume ownership
+        ALTER VOLUME my_catalog.my_schema.my_volume OWNER TO `platform_team`;
+        ```
+
+        Key points:
+        - Only the current owner or a metastore admin can transfer ownership
+        - The owner has all privileges on the object
+        - The owner can grant/revoke privileges to others
+        - There is exactly one owner per securable
+      execution_success: null
+    expectations:
+      expected_facts:
+        - "ALTER"
+        - "OWNER TO"
+      expected_patterns:
+        - pattern: "ALTER SCHEMA.*OWNER TO"
+          min_count: 1
+          description: "schema ownership transfer"
+        - pattern: "OWNER TO"
+          min_count: 1
+          description: "ownership transfer syntax"
+      guidelines:
+        - "Must use ALTER ... OWNER TO syntax"
+        - "Must explain who can transfer ownership"
+        - "Should show examples for multiple securable types"
+    metadata:
+      category: "happy_path"
+      difficulty: "easy"
+      source: "manual"
+      tags: ["sql", "acl", "ownership", "transfer"]
+
+  # ============================================================================
   # UC ACLs — Read-Only Access Pattern
   # ============================================================================
   - id: "uc_acl_read_only_001"
@@ -1199,17 +1639,18 @@ test_cases:
 
         ```python
         from databricks.sdk import WorkspaceClient
+        from databricks.sdk.service.catalog import Privilege, PermissionsChange, SecurableType
 
         w = WorkspaceClient()
 
         # Grant SELECT to data_readers
         w.grants.update(
-            securable_type="TABLE",
+            securable_type=SecurableType.TABLE,
             full_name="my_catalog.my_schema.my_table",
-            changes=[{
-                "principal": "data_readers",
-                "add": ["SELECT"],
-            }]
+            changes=[PermissionsChange(
+                principal="data_readers",
+                add=[Privilege.SELECT],
+            )]
         )
         ```
 
@@ -1218,7 +1659,7 @@ test_cases:
         ```python
         # Get current grants
         grants = w.grants.get(
-            securable_type="TABLE",
+            securable_type=SecurableType.TABLE,
             full_name="my_catalog.my_schema.my_table"
         )
         for assignment in grants.privilege_assignments:
@@ -1229,43 +1670,45 @@ test_cases:
 
         ```python
         w.grants.update(
-            securable_type="TABLE",
+            securable_type=SecurableType.TABLE,
             full_name="my_catalog.my_schema.my_table",
-            changes=[{
-                "principal": "data_readers",
-                "remove": ["SELECT"],
-            }]
+            changes=[PermissionsChange(
+                principal="data_readers",
+                remove=[Privilege.SELECT],
+            )]
         )
         ```
 
         Key points:
         - `w.grants.update()` handles both grant (via `add`) and revoke (via `remove`)
-        - `securable_type` can be `"CATALOG"`, `"SCHEMA"`, `"TABLE"`, `"VOLUME"`, `"FUNCTION"`
+        - Use `SecurableType` enum: `CATALOG`, `SCHEMA`, `TABLE`, `VOLUME`, `FUNCTION`
+        - Use `Privilege` enum: `SELECT`, `MODIFY`, `CREATE_TABLE`, etc.
+        - Use `PermissionsChange` objects instead of raw dicts
         - `w.grants.get()` returns current grants; `w.grants.get_effective()` includes inherited
       execution_success: null
     expectations:
       expected_facts:
         - "w.grants.update"
-        - "securable_type"
-        - "principal"
-        - "add"
+        - "PermissionsChange"
+        - "SecurableType"
+        - "Privilege"
         - "SELECT"
       expected_patterns:
         - pattern: "w\\.grants\\.update\\("
           min_count: 1
           description: "SDK grant update call"
-        - pattern: '"add".*\\[.*"SELECT".*\\]'
+        - pattern: "PermissionsChange\\("
           min_count: 1
-          description: "add SELECT privilege"
-        - pattern: "securable_type.*TABLE"
+          description: "typed permissions change object"
+        - pattern: "Privilege\\.SELECT"
           min_count: 1
-          description: "securable type specified"
+          description: "typed privilege enum"
         - pattern: "w\\.grants\\.get\\("
           min_count: 1
           description: "verify grants"
       guidelines:
-        - "Must use w.grants.update() with add list"
-        - "Must specify securable_type and full_name"
+        - "Must use w.grants.update() with PermissionsChange objects"
+        - "Must use SecurableType and Privilege enums, not raw strings/dicts"
         - "Should show how to verify grants with w.grants.get()"
         - "Should show how to revoke with remove list"
     metadata:

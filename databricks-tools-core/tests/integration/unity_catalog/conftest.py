@@ -266,33 +266,3 @@ def cleanup_policies():
             )
         except Exception as e:
             logger.warning(f"Failed to cleanup policy {name}: {e}")
-
-
-@pytest.fixture(scope="function")
-def cleanup_governed_tags():
-    """
-    Track and cleanup governed tags (tag policies) created during tests.
-
-    Uses the Tag Policies API (w.tag_policies) to delete governed tags.
-
-    Usage:
-        def test_create_tag(cleanup_governed_tags):
-            w.tag_policies.create_tag_policy(...)
-            cleanup_governed_tags("my_tag_key")
-    """
-    tags_to_cleanup = []
-
-    def register(tag_key: str):
-        if tag_key not in tags_to_cleanup:
-            tags_to_cleanup.append(tag_key)
-            logger.info(f"Registered governed tag for cleanup: {tag_key}")
-
-    yield register
-
-    w = get_workspace_client()
-    for tag_key in tags_to_cleanup:
-        try:
-            logger.info(f"Cleaning up governed tag: {tag_key}")
-            w.tag_policies.delete_tag_policy(tag_key=tag_key)
-        except Exception as e:
-            logger.warning(f"Failed to cleanup governed tag {tag_key}: {e}")

@@ -50,6 +50,37 @@ logger = logging.getLogger(__name__)
 
 UC_TEST_PREFIX = "uc_test"
 
+# Governed tags need time to propagate to the FGAC policy system after creation.
+TAG_PROPAGATION_DELAY_SECONDS = 30
+
+
+def _create_governed_tag(tag_key: str, allowed_values: list[str]) -> None:
+    """Create a governed tag via the Tag Policies API and wait for propagation."""
+    from databricks.sdk.service.tags import TagPolicy, Value
+
+    w = get_workspace_client()
+    w.tag_policies.create_tag_policy(
+        tag_policy=TagPolicy(
+            tag_key=tag_key,
+            description=f"Integration test tag ({tag_key})",
+            values=[Value(name=v) for v in allowed_values],
+        )
+    )
+    logger.info(f"Created governed tag: {tag_key} (values={allowed_values})")
+
+    logger.info(f"Waiting {TAG_PROPAGATION_DELAY_SECONDS}s for governed tag propagation...")
+    time.sleep(TAG_PROPAGATION_DELAY_SECONDS)
+
+
+def _delete_governed_tag(tag_key: str) -> None:
+    """Delete a governed tag via the Tag Policies API."""
+    try:
+        w = get_workspace_client()
+        w.tag_policies.delete_tag_policy(tag_key=tag_key)
+        logger.info(f"Deleted governed tag: {tag_key}")
+    except Exception as e:
+        logger.warning(f"Failed to delete governed tag {tag_key}: {e}")
+
 
 # ---------------------------------------------------------------------------
 # Discovery tests
@@ -617,7 +648,7 @@ class TestApprovalTokenEnforcement:
 
     def test_create_with_invalid_token_raises_value_error(self):
         """create_fgac_policy with an invalid token should raise ValueError before admin check."""
-        with pytest.raises(ValueError, match="Invalid or expired approval token"):
+        with pytest.raises(ValueError, match="Malformed approval token"):
             create_fgac_policy(
                 policy_name="test_bad_token",
                 policy_type="COLUMN_MASK",
@@ -692,7 +723,7 @@ class TestApprovalTokenEnforcement:
 
         cleanup_policies((policy_name, "SCHEMA", full_schema))
 
-        TestFgacPolicyCRUD._create_governed_tag(tag_key, [tag_value])
+        _create_governed_tag(tag_key, [tag_value])
 
         try:
             fn_name = f"{test_catalog}.{uc_test_schema}.{UC_TEST_PREFIX}_tok_fn_{unique_name}"
@@ -757,7 +788,7 @@ class TestApprovalTokenEnforcement:
             )
 
         finally:
-            TestFgacPolicyCRUD._delete_governed_tag(tag_key)
+            _delete_governed_tag(tag_key)
 
     def test_token_with_mismatched_params_raises(self):
         """Token from preview with name A should not work for create with name B."""
@@ -805,7 +836,7 @@ class TestApprovalTokenEnforcement:
         original_ttl = fgac_mod._TOKEN_TTL_SECONDS
         try:
             fgac_mod._TOKEN_TTL_SECONDS = 0
-            with pytest.raises(ValueError, match="Invalid or expired approval token"):
+            with pytest.raises(ValueError, match="Expired approval token"):
                 create_fgac_policy(
                     policy_name="test_expire",
                     policy_type="COLUMN_MASK",
@@ -829,7 +860,7 @@ class TestApprovalTokenEnforcement:
         )
         token = delete_preview["approval_token"]
 
-        with pytest.raises(ValueError, match="Invalid or expired approval token"):
+        with pytest.raises(ValueError, match="action mismatch"):
             create_fgac_policy(
                 policy_name="test_replay",
                 policy_type="COLUMN_MASK",
@@ -887,35 +918,6 @@ class TestFgacPolicyCRUD:
     then cleans it up afterwards. No manual UI setup is required.
     """
 
-    @staticmethod
-    def _create_governed_tag(tag_key: str, allowed_values: list[str]) -> None:
-        """Create a governed tag via the Tag Policies API."""
-        from databricks.sdk.service.tags import TagPolicy, Value
-
-        w = get_workspace_client()
-        w.tag_policies.create_tag_policy(
-            tag_policy=TagPolicy(
-                tag_key=tag_key,
-                description=f"Integration test tag ({tag_key})",
-                values=[Value(name=v) for v in allowed_values],
-            )
-        )
-        logger.info(f"Created governed tag: {tag_key} (values={allowed_values})")
-
-        # Wait for governed tag to propagate to the FGAC policy system
-        logger.info("Waiting 30s for governed tag propagation...")
-        time.sleep(30)
-
-    @staticmethod
-    def _delete_governed_tag(tag_key: str) -> None:
-        """Delete a governed tag via the Tag Policies API."""
-        try:
-            w = get_workspace_client()
-            w.tag_policies.delete_tag_policy(tag_key=tag_key)
-            logger.info(f"Deleted governed tag: {tag_key}")
-        except Exception as e:
-            logger.warning(f"Failed to delete governed tag {tag_key}: {e}")
-
     def test_create_get_update_delete_column_mask_policy(
         self,
         test_catalog: str,
@@ -938,7 +940,7 @@ class TestFgacPolicyCRUD:
         cleanup_policies((policy_name, "SCHEMA", full_schema))
 
         # --- Setup: governed tag, masking UDF, column tag ---
-        self._create_governed_tag(tag_key, [tag_value])
+        _create_governed_tag(tag_key, [tag_value])
 
         try:
             fn_name = f"{test_catalog}.{uc_test_schema}.{UC_TEST_PREFIX}_mask_fn_{unique_name}"
@@ -1072,7 +1074,7 @@ class TestFgacPolicyCRUD:
             logger.info("Policy deleted")
 
         finally:
-            self._delete_governed_tag(tag_key)
+            _delete_governed_tag(tag_key)
 
     def test_create_row_filter_policy(
         self,
@@ -1095,7 +1097,7 @@ class TestFgacPolicyCRUD:
         cleanup_policies((policy_name, "SCHEMA", full_schema))
 
         # --- Setup: governed tag, zero-arg UDF, column tag ---
-        self._create_governed_tag(tag_key, [tag_value])
+        _create_governed_tag(tag_key, [tag_value])
 
         try:
             fn_name = f"{test_catalog}.{uc_test_schema}.{UC_TEST_PREFIX}_rf_fn_{unique_name}"
@@ -1176,4 +1178,4 @@ class TestFgacPolicyCRUD:
             logger.info("Row filter policy deleted")
 
         finally:
-            self._delete_governed_tag(tag_key)
+            _delete_governed_tag(tag_key)
