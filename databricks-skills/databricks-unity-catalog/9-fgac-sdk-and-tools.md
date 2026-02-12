@@ -50,13 +50,25 @@ Every mutating call **requires** a valid `approval_token` obtained from `preview
 
 ### Admin Group Check
 
-The caller must be a member of the configured admin group. Membership is verified via `w.current_user.me().groups`.
+The caller must be a member of the configured admin group before any mutating operation (create/update/delete) is allowed. Membership is verified via `w.current_user.me().groups`.
+
+Set the `FGAC_ADMIN_GROUP` environment variable to your workspace admin group name:
+
+```bash
+# Example: use your workspace's governance admin group
+export FGAC_ADMIN_GROUP="governance_admins"
+
+# Or use the workspace admins group
+export FGAC_ADMIN_GROUP="admins"
+```
+
+If unset, defaults to `"admins"`. This should match an existing group in your Databricks workspace that contains users authorized to manage FGAC policies.
 
 ### Environment Variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `FGAC_ADMIN_GROUP` | `admins` | Required group membership for mutations |
+| `FGAC_ADMIN_GROUP` | `admins` | Databricks workspace group whose members can create/update/delete FGAC policies |
 
 ---
 
