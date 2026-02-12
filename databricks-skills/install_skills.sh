@@ -95,7 +95,7 @@ get_skill_extra_files() {
         "databricks-app-python") echo "dash.md streamlit.md README.md" ;;
         "databricks-jobs") echo "task-types.md triggers-schedules.md notifications-monitoring.md examples.md" ;;
         "databricks-python-sdk") echo "doc-index.md examples/1-authentication.py examples/2-clusters-and-jobs.py examples/3-sql-and-warehouses.py examples/4-unity-catalog.py examples/5-serving-and-vector-search.py" ;;
-        "databricks-unity-catalog") echo "5-system-tables.md 6-volumes.md 7-fgac-overview.md 8-fgac-sql-generation.md 9-fgac-sdk-and-tools.md" ;;
+        "databricks-unity-catalog") echo "5-system-tables.md 6-volumes.md 7-fgac-overview.md 8-fgac-sql-generation.md 9-fgac-sdk-and-tools.md 10-uc-acls.md" ;;
         "lakebase-provisioned") echo "connection-patterns.md reverse-etl.md" ;;
         "mlflow-evaluation") echo "references/CRITICAL-interfaces.md references/GOTCHAS.md references/patterns-context-optimization.md references/patterns-datasets.md references/patterns-evaluation.md references/patterns-scorers.md references/patterns-trace-analysis.md references/user-journeys.md" ;;
         "model-serving") echo "1-classical-ml.md 2-custom-pyfunc.md 3-genai-agents.md 4-tools-integration.md 5-development-testing.md 6-logging-registration.md 7-deployment.md 8-querying-endpoints.md 9-package-requirements.md" ;;
