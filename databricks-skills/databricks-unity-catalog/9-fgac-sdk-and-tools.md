@@ -54,10 +54,10 @@ The caller must be a member of the configured admin group. Membership is verifie
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `FGAC_APPROVAL_SECRET` | `fgac-default-dev-secret` | HMAC secret for token signing |
+| `FGAC_APPROVAL_SECRET` | Random per process | Optional. HMAC secret for token signing. Auto-generated if unset. |
 | `FGAC_ADMIN_GROUP` | `admins` | Required group membership for mutations |
 
-> **Important:** In production, always set `FGAC_APPROVAL_SECRET` to a strong random value.
+> **Note:** `FGAC_APPROVAL_SECRET` is auto-generated per process using `os.urandom(32)`. Only set it if you need tokens to persist across process restarts.
 
 ---
 
