@@ -356,6 +356,31 @@ analyze_fgac_coverage(
 }
 ```
 
+#### `check_policy_quota`
+
+Check if the policy quota allows creating a new policy on a securable.
+
+```python
+check_policy_quota(
+    securable_type: str,       # "CATALOG", "SCHEMA", or "TABLE"
+    securable_fullname: str,   # e.g., "my_catalog.my_schema"
+)
+```
+
+**Returns:**
+```json
+{
+  "success": true,
+  "securable_type": "SCHEMA",
+  "securable_fullname": "my_catalog.my_schema",
+  "current": 3,
+  "max": 10,
+  "can_create": true
+}
+```
+
+**Quotas:** CATALOG=10, SCHEMA=10, TABLE=5.
+
 ### Preview Tool (Human-in-the-Loop Gate)
 
 #### `preview_policy_changes`
