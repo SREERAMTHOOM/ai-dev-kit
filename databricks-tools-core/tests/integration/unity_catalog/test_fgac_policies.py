@@ -67,9 +67,7 @@ class TestListFgacPolicies:
         assert result["securable_fullname"] == test_catalog
         assert isinstance(result["policies"], list)
         assert isinstance(result["policy_count"], int)
-        logger.info(
-            f"Found {result['policy_count']} policies on catalog {test_catalog}"
-        )
+        logger.info(f"Found {result['policy_count']} policies on catalog {test_catalog}")
 
     def test_list_policies_on_schema(self, test_catalog: str, uc_test_schema: str):
         """Should list policies on a schema."""
@@ -114,9 +112,7 @@ class TestListFgacPolicies:
 class TestGetTablePolicies:
     """Tests for getting column masks and row filters on a table."""
 
-    def test_get_table_policies(
-        self, test_catalog: str, uc_test_schema: str, uc_test_table: str
-    ):
+    def test_get_table_policies(self, test_catalog: str, uc_test_schema: str, uc_test_table: str):
         """Should return column masks and row filters for a table."""
         # uc_test_table is "catalog.schema.table"
         parts = uc_test_table.split(".")
@@ -130,10 +126,7 @@ class TestGetTablePolicies:
         assert result["table"] == uc_test_table
         assert isinstance(result["column_masks"], list)
         assert isinstance(result["row_filters"], list)
-        logger.info(
-            f"Table {uc_test_table}: {len(result['column_masks'])} masks, "
-            f"{len(result['row_filters'])} filters"
-        )
+        logger.info(f"Table {uc_test_table}: {len(result['column_masks'])} masks, {len(result['row_filters'])} filters")
 
 
 @pytest.mark.integration
@@ -530,9 +523,7 @@ class TestApprovalTokenEnforcement:
         TestFgacPolicyCRUD._create_governed_tag(tag_key, [tag_value])
 
         try:
-            fn_name = (
-                f"{test_catalog}.{uc_test_schema}.{UC_TEST_PREFIX}_tok_fn_{unique_name}"
-            )
+            fn_name = f"{test_catalog}.{uc_test_schema}.{UC_TEST_PREFIX}_tok_fn_{unique_name}"
             cleanup_functions(fn_name)
 
             create_security_function(
@@ -826,9 +817,7 @@ class TestFgacPolicyCRUD:
                 securable_fullname=full_schema,
             )
             policy_names = [p.get("name") for p in list_result["policies"]]
-            assert policy_name in policy_names, (
-                f"Expected {policy_name} in {policy_names}"
-            )
+            assert policy_name in policy_names, f"Expected {policy_name} in {policy_names}"
             logger.info(f"Policy found in list ({list_result['policy_count']} total)")
 
             # --- PREVIEW DELETE ---
@@ -881,9 +870,7 @@ class TestFgacPolicyCRUD:
         self._create_governed_tag(tag_key, [tag_value])
 
         try:
-            fn_name = (
-                f"{test_catalog}.{uc_test_schema}.{UC_TEST_PREFIX}_rf_fn_{unique_name}"
-            )
+            fn_name = f"{test_catalog}.{uc_test_schema}.{UC_TEST_PREFIX}_rf_fn_{unique_name}"
             cleanup_functions(fn_name)
 
             execute_sql(

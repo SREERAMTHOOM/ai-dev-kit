@@ -43,9 +43,7 @@ def _generate_approval_token(params: dict) -> str:
     clean_params = {k: v for k, v in params.items() if v is not None}
     clean_params["timestamp"] = int(time.time())
     payload = json.dumps(clean_params, sort_keys=True)
-    signature = hmac.new(
-        _APPROVAL_SECRET.encode(), payload.encode(), hashlib.sha256
-    ).hexdigest()
+    signature = hmac.new(_APPROVAL_SECRET.encode(), payload.encode(), hashlib.sha256).hexdigest()
     b64_payload = base64.b64encode(payload.encode()).decode()
     return f"{signature}:{b64_payload}"
 
@@ -65,9 +63,7 @@ def _validate_approval_token(approval_token: str, current_params: dict) -> None:
     except Exception:
         raise ValueError("Invalid or expired approval token")
 
-    expected_sig = hmac.new(
-        _APPROVAL_SECRET.encode(), payload.encode(), hashlib.sha256
-    ).hexdigest()
+    expected_sig = hmac.new(_APPROVAL_SECRET.encode(), payload.encode(), hashlib.sha256).hexdigest()
     if not hmac.compare_digest(signature, expected_sig):
         raise ValueError("Invalid or expired approval token")
 
@@ -122,8 +118,7 @@ def _validate_securable_type(securable_type: str) -> str:
     normalized = securable_type.upper()
     if normalized not in _VALID_SECURABLE_TYPES:
         raise ValueError(
-            f"Invalid securable_type: '{securable_type}'. "
-            f"Must be one of: {sorted(_VALID_SECURABLE_TYPES)}"
+            f"Invalid securable_type: '{securable_type}'. Must be one of: {sorted(_VALID_SECURABLE_TYPES)}"
         )
     return normalized
 
@@ -132,10 +127,7 @@ def _validate_policy_type(policy_type: str) -> str:
     """Validate and normalize policy type."""
     normalized = policy_type.upper().replace("POLICY_TYPE_", "")
     if normalized not in _VALID_POLICY_TYPES:
-        raise ValueError(
-            f"Invalid policy_type: '{policy_type}'. "
-            f"Must be one of: {sorted(_VALID_POLICY_TYPES)}"
-        )
+        raise ValueError(f"Invalid policy_type: '{policy_type}'. Must be one of: {sorted(_VALID_POLICY_TYPES)}")
     return normalized
 
 
@@ -220,8 +212,7 @@ def list_fgac_policies(
             p
             for p in policies
             if str(getattr(p, "policy_type", "")) in (ptype, sdk_ptype)
-            or (p.as_dict() if hasattr(p, "as_dict") else {}).get("policy_type")
-            in (ptype, sdk_ptype)
+            or (p.as_dict() if hasattr(p, "as_dict") else {}).get("policy_type") in (ptype, sdk_ptype)
         ]
 
     policy_dicts = [_policy_to_dict(p) for p in policies]
@@ -411,11 +402,7 @@ def check_policy_quota(
     )
 
     # Count only direct policies (not inherited)
-    direct = [
-        p
-        for p in existing
-        if getattr(p, "on_securable_fullname", None) == securable_fullname
-    ]
+    direct = [p for p in existing if getattr(p, "on_securable_fullname", None) == securable_fullname]
 
     max_policies = _POLICY_QUOTAS.get(stype, 10)
     return {
@@ -471,9 +458,7 @@ def preview_policy_changes(
     """
     action = action.upper()
     if action not in ("CREATE", "UPDATE", "DELETE"):
-        raise ValueError(
-            f"Invalid action: '{action}'. Must be CREATE, UPDATE, or DELETE"
-        )
+        raise ValueError(f"Invalid action: '{action}'. Must be CREATE, UPDATE, or DELETE")
 
     stype = _validate_securable_type(securable_type)
     _validate_identifier(securable_fullname)
@@ -492,11 +477,7 @@ def preview_policy_changes(
         if not to_principals:
             raise ValueError("to_principals is required for CREATE action")
 
-        tag_match = (
-            f"hasTagValue('{tag_name}', '{tag_value}')"
-            if tag_value
-            else f"hasTag('{tag_name}')"
-        )
+        tag_match = f"hasTagValue('{tag_name}', '{tag_value}')" if tag_value else f"hasTag('{tag_name}')"
 
         principals_sql = ", ".join(f"`{p}`" for p in to_principals)
         except_sql = ", ".join(f"`{p}`" for p in safe_except) if safe_except else ""
@@ -578,9 +559,7 @@ def preview_policy_changes(
             "securable": f"{stype} {securable_fullname}",
             "equivalent_sql": equivalent_sql,
         }
-        warnings.append(
-            "This action is irreversible. The policy will be permanently removed."
-        )
+        warnings.append("This action is irreversible. The policy will be permanently removed.")
 
     # Generate approval token binding these params
     token_params = {
@@ -691,11 +670,7 @@ def create_fgac_policy(
     )
 
     # Build tag match condition
-    tag_condition = (
-        f"hasTagValue('{tag_name}', '{tag_value}')"
-        if tag_value
-        else f"hasTag('{tag_name}')"
-    )
+    tag_condition = f"hasTagValue('{tag_name}', '{tag_value}')" if tag_value else f"hasTag('{tag_name}')"
     alias = "masked_col" if ptype == "COLUMN_MASK" else "filter_col"
     match_columns = [MatchColumn(alias=alias, condition=tag_condition)]
 
