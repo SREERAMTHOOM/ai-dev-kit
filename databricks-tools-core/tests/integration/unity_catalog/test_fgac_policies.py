@@ -785,6 +785,62 @@ class TestApprovalTokenEnforcement:
                 approval_token=token,
             )
 
+    def test_expired_token_raises(self):
+        """Token past TTL should be rejected."""
+        import databricks_tools_core.unity_catalog.fgac_policies as fgac_mod
+
+        preview = preview_policy_changes(
+            action="CREATE",
+            policy_name="test_expire",
+            securable_type="SCHEMA",
+            securable_fullname="cat.sch",
+            policy_type="COLUMN_MASK",
+            to_principals=["analysts"],
+            function_name="cat.sch.mask",
+            tag_name="pii",
+        )
+        token = preview["approval_token"]
+
+        # Temporarily set TTL to 0 so the token is already expired
+        original_ttl = fgac_mod._TOKEN_TTL_SECONDS
+        try:
+            fgac_mod._TOKEN_TTL_SECONDS = 0
+            with pytest.raises(ValueError, match="Invalid or expired approval token"):
+                create_fgac_policy(
+                    policy_name="test_expire",
+                    policy_type="COLUMN_MASK",
+                    securable_type="SCHEMA",
+                    securable_fullname="cat.sch",
+                    function_name="cat.sch.mask",
+                    to_principals=["analysts"],
+                    tag_name="pii",
+                    approval_token=token,
+                )
+        finally:
+            fgac_mod._TOKEN_TTL_SECONDS = original_ttl
+
+    def test_cross_action_replay_raises(self):
+        """DELETE preview token should not work for CREATE operation."""
+        delete_preview = preview_policy_changes(
+            action="DELETE",
+            policy_name="test_replay",
+            securable_type="SCHEMA",
+            securable_fullname="cat.sch",
+        )
+        token = delete_preview["approval_token"]
+
+        with pytest.raises(ValueError, match="Invalid or expired approval token"):
+            create_fgac_policy(
+                policy_name="test_replay",
+                policy_type="COLUMN_MASK",
+                securable_type="SCHEMA",
+                securable_fullname="cat.sch",
+                function_name="cat.sch.mask",
+                to_principals=["analysts"],
+                tag_name="pii",
+                approval_token=token,
+            )
+
 
 # ---------------------------------------------------------------------------
 # Admin group check tests

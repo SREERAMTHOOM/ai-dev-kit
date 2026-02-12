@@ -5,7 +5,7 @@ Consolidated MCP tool for managing Fine-Grained Access Control (FGAC) policies.
 Dispatches to core functions in databricks-tools-core based on the action parameter.
 """
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from databricks_tools_core.unity_catalog import (
     list_fgac_policies as _list_fgac_policies,
@@ -30,24 +30,24 @@ from ..server import mcp
 @mcp.tool
 def manage_uc_fgac_policies(
     action: str,
-    securable_type: str = None,
-    securable_fullname: str = None,
-    policy_name: str = None,
-    policy_type: str = None,
-    to_principals: List[str] = None,
-    except_principals: List[str] = None,
-    function_name: str = None,
-    tag_name: str = None,
-    tag_value: str = None,
-    comment: str = None,
+    securable_type: Optional[str] = None,
+    securable_fullname: Optional[str] = None,
+    policy_name: Optional[str] = None,
+    policy_type: Optional[str] = None,
+    to_principals: Optional[List[str]] = None,
+    except_principals: Optional[List[str]] = None,
+    function_name: Optional[str] = None,
+    tag_name: Optional[str] = None,
+    tag_value: Optional[str] = None,
+    comment: Optional[str] = None,
     include_inherited: bool = True,
-    catalog: str = None,
-    schema: str = None,
-    table: str = None,
-    udf_catalog: str = None,
-    udf_schema: str = None,
-    preview_action: str = None,
-    approval_token: str = None,
+    catalog: Optional[str] = None,
+    schema: Optional[str] = None,
+    table: Optional[str] = None,
+    udf_catalog: Optional[str] = None,
+    udf_schema: Optional[str] = None,
+    preview_action: Optional[str] = None,
+    approval_token: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Manage FGAC (Fine-Grained Access Control) policies on Unity Catalog securables.

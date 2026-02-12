@@ -283,7 +283,7 @@ Every FGAC policy **MUST** include `EXCEPT \`gov_admin\`` to protect administrat
 | Per Schema | 10 |
 | Per Table | 5 |
 
-https://docs.databricks.com/gcp/en/data-governance/unity-catalog/abac/policies#policy-quotas
+https://docs.databricks.com/aws/en/data-governance/unity-catalog/abac/policies#policy-quotas
 ---
 
 ## Human-in-the-Loop Governance Workflow
