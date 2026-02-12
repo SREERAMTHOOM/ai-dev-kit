@@ -99,7 +99,7 @@ get_skill_extra_files() {
         "databricks-app-python") echo "dash.md streamlit.md README.md" ;;
         "databricks-jobs") echo "task-types.md triggers-schedules.md notifications-monitoring.md examples.md" ;;
         "databricks-python-sdk") echo "doc-index.md examples/1-authentication.py examples/2-clusters-and-jobs.py examples/3-sql-and-warehouses.py examples/4-unity-catalog.py examples/5-serving-and-vector-search.py" ;;
-        "databricks-unity-catalog") echo "5-system-tables.md 6-volumes.md 7-fgac-overview.md 8-fgac-sql-generation.md 9-fgac-sdk-and-tools.md" ;;
+        "databricks-unity-catalog") echo "5-system-tables.md 6-volumes.md 7-fgac-overview.md 8-fgac-sql-generation.md 9-fgac-sdk-and-tools.md 10-uc-acls.md" ;;
         "lakebase-autoscale") echo "projects.md branches.md computes.md connection-patterns.md reverse-etl.md" ;;
         "lakebase-provisioned") echo "connection-patterns.md reverse-etl.md" ;;
         "metric-views") echo "yaml-reference.md patterns.md" ;;
