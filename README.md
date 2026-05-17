@@ -78,7 +78,7 @@ Curated by Databricks field experts. Brings the patterns, skills, and 75+ execut
 - **Spark Declarative Pipelines** (streaming tables, CDC, SCD Type 2, Auto Loader)
 - **Databricks Jobs** (scheduled workflows, multi-task DAGs)
 - **AI/BI Dashboards** (visualizations, KPIs, analytics)
-- **Unity Catalog** (tables, volumes, governance)
+- **Unity Catalog** (ABAC/FGAC policies, governed tags, data classification, object privileges, system tables, volumes)
 - **Genie Spaces** (natural language data exploration)
 - **Knowledge Assistants** (RAG-based document Q&A)
 - **MLflow Experiments** (evaluation, scoring, traces)

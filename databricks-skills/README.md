@@ -91,7 +91,7 @@ cp -r ai-dev-kit/databricks-skills/databricks-agent-bricks .claude/skills/
 
 ### 📊 Analytics & Dashboards
 - **databricks-aibi-dashboards** - Databricks AI/BI dashboards (with SQL validation workflow)
-- **databricks-unity-catalog** - System tables for lineage, audit, billing
+- **databricks-unity-catalog** - ABAC/FGAC policies, governed tags, data classification, object privileges, system tables (lineage, audit, billing), volumes
 
 ### 🔧 Data Engineering
 - **databricks-iceberg** - Apache Iceberg tables (Managed/Foreign), UniForm, Iceberg REST Catalog, Iceberg Clients Interoperability

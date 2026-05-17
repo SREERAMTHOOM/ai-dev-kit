@@ -1,7 +1,10 @@
 skill_name: databricks-unity-catalog
 tool_modules: [unity_catalog, sql]
-description: Unity Catalog system tables and volumes. Use when querying system tables (audit, lineage, billing) or working
-  with volume file operations (upload, download, list files in /Volumes/).
+description: >
+  Unity Catalog governance, fine-grained access control (FGAC), and system tables. Use when working with
+  ABAC policies, governed tags, data classification, row-level security, column masking, traditional row
+  filters, dynamic views, object privileges (GRANT/REVOKE), or querying system tables (audit, lineage,
+  billing) and volume file operations.
 scorers:
   enabled:
   - sql_syntax

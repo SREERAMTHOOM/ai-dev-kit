@@ -1,15 +1,22 @@
 ---
 name: databricks-unity-catalog
-description: "Unity Catalog system tables and volumes. Use when querying system tables (audit, lineage, billing) or working with volume file operations (upload, download, list files in /Volumes/)."
+description: "Unity Catalog governance and fine-grained access control (FGAC). Use when the user wants to restrict row access, mask or redact columns, hide sensitive data, set up PII protection, configure who can see what, implement row-level or column-level security, work with ABAC policies, governed tags, data classification, object privileges (GRANT/REVOKE), or migrate from dynamic views or traditional row filters to ABAC. Also use for system tables (audit, lineage, billing) and volume file operations."
 ---
 
 # Unity Catalog
 
-Guidance for Unity Catalog system tables, volumes, and governance.
+Guidance for Unity Catalog governance, fine-grained access control (FGAC), ABAC policies, object privileges, system tables, volumes, and data profiling.
 
 ## When to Use This Skill
 
 Use this skill when:
+- Implementing **ABAC policies** (attribute-based row filters and column masks driven by governed tags)
+- Managing **governed tags** (create, apply, and maintain tag taxonomy for ABAC)
+- Setting up **data classification** (AI-powered PII and sensitive data detection)
+- Working with **Fine-Grained Access Control (FGAC)** — traditional per-table or ABAC approach
+- Configuring **object privileges** (GRANT/REVOKE on catalogs, schemas, tables, functions)
+- **Migrating** from traditional per-table row filters/column masks to ABAC policies
+- **Migrating** from dynamic views used for row/column security to ABAC policies
 - Working with **volumes** (upload, download, list files in `/Volumes/`)
 - Querying **lineage** (table dependencies, column-level lineage)
 - Analyzing **audit logs** (who accessed what, permission changes)
@@ -23,6 +30,14 @@ Use this skill when:
 
 | Topic | File | Description |
 |-------|------|-------------|
+| UC ACLs | [uc-acls.md](uc-acls.md) | Read when setting up GRANT/REVOKE, troubleshooting access errors, or before any ABAC work — prerequisite |
+| ABAC Overview | [abac-overview.md](abac-overview.md) | Read when starting an ABAC implementation or deciding between ABAC, traditional filters, and dynamic views |
+| Governed Tags | [abac-governed-tags.md](abac-governed-tags.md) | Read when creating, applying, or managing governed tags, or setting up a tag taxonomy |
+| Traditional Row Filters & Column Masks | [traditional-row-filters-and-column-masks.md](traditional-row-filters-and-column-masks.md) | Read when working with ALTER TABLE SET ROW FILTER / SET MASK, or migrating traditional filters to ABAC |
+| Dynamic Views | [uc-dynamic-views.md](uc-dynamic-views.md) | Read when working with or migrating security-bearing dynamic views to ABAC policies |
+| ABAC Policies | [abac-policies.md](abac-policies.md) | Read when creating, editing, or troubleshooting ABAC row filter or column mask policies |
+| Data Classification | [abac-data-classification.md](abac-data-classification.md) | Read when enabling AI-powered PII detection or using classification results to drive ABAC policy recommendations |
+| ABAC Patterns | [abac-patterns.md](abac-patterns.md) | Read when building UDFs for ABAC, looking for end-to-end walkthroughs, or optimizing filter/mask performance |
 | System Tables | [5-system-tables.md](5-system-tables.md) | Lineage, audit, billing, compute, jobs, query history |
 | Volumes | [6-volumes.md](6-volumes.md) | Volume file operations, permissions, best practices |
 | Data Profiling | [7-data-profiling.md](7-data-profiling.md) | Data profiling, drift detection, profile metrics |

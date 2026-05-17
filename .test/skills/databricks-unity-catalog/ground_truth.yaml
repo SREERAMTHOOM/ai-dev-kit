@@ -253,3 +253,800 @@ test_cases:
     category: happy_path
     difficulty: easy
     source: auto_generated
+
+# --- ABAC / FGAC test cases ---
+
+- id: uc_abac_governed_tags_create_007
+  inputs:
+    prompt: "How do I create governed tags for PII data classification in Unity Catalog?"
+  outputs:
+    response: |
+      Use `CREATE GOVERNED TAG` to define the tag taxonomy before attaching policies:
+
+      ```sql
+      -- Tag for PII type (drives column mask policies)
+      CREATE GOVERNED TAG IF NOT EXISTS pii
+        DESCRIPTION 'Type of personally identifiable information'
+        VALUES ('ssn', 'ccn', 'dob', 'email', 'phone', 'name', 'address');
+
+      -- Tag for sensitivity level (drives row filter policies)
+      CREATE GOVERNED TAG IF NOT EXISTS sensitivity
+        DESCRIPTION 'Data sensitivity level'
+        VALUES ('public', 'internal', 'confidential', 'restricted');
+      ```
+
+      Apply tags to tables and columns:
+
+      ```sql
+      -- Tag the table
+      ALTER TABLE main.hr.employees
+      SET TAGS ('sensitivity' = 'confidential');
+
+      -- Tag individual columns
+      ALTER TABLE main.hr.employees
+      ALTER COLUMN ssn SET TAGS ('pii' = 'ssn');
+
+      ALTER TABLE main.hr.employees
+      ALTER COLUMN email SET TAGS ('pii' = 'email');
+      ```
+
+      **Required permissions:** `CREATE GOVERNED TAG` (account admin or granted), `APPLY TAG` on
+      the table, `ASSIGN` on the governed tag.
+  expectations:
+    expected_facts:
+      - "CREATE GOVERNED TAG defines the tag key and optional allowed values"
+      - "VALUES clause restricts which tag values are permitted"
+      - "ALTER TABLE SET TAGS applies a tag to a table"
+      - "ALTER TABLE ALTER COLUMN SET TAGS applies a tag to a column"
+      - "APPLY TAG permission is required to tag objects"
+      - "ASSIGN permission is required on the governed tag itself"
+    expected_patterns:
+      - pattern: "CREATE GOVERNED TAG"
+        min_count: 1
+        description: "Creates a governed tag"
+      - pattern: "VALUES\\s*\\("
+        min_count: 1
+        description: "Defines allowed tag values"
+      - pattern: "ALTER TABLE.*SET TAGS"
+        min_count: 1
+        description: "Applies tag to table"
+      - pattern: "ALTER COLUMN.*SET TAGS"
+        min_count: 1
+        description: "Applies tag to column"
+    guidelines:
+      - "Must show both tag creation and tag application"
+      - "Must mention required permissions (APPLY TAG and ASSIGN)"
+      - "Must use IF NOT EXISTS for idempotent tag creation"
+  metadata:
+    category: happy_path
+    difficulty: easy
+
+- id: uc_abac_row_filter_policy_008
+  inputs:
+    prompt: "How do I create an ABAC row filter policy in Unity Catalog to restrict rows based on data sensitivity?"
+  outputs:
+    response: |
+      ABAC row filter policies attach to a schema or catalog and automatically apply to all matching
+      tables based on governed tags. No per-table configuration is needed.
+
+      ```sql
+      -- Step 1: Create the filter UDF
+      CREATE OR REPLACE FUNCTION main.security.region_filter(region STRING)
+      RETURNS BOOLEAN
+      RETURN is_account_group_member(region) OR is_account_group_member('data-admins');
+
+      -- Step 2: Grant EXECUTE to the policy creator only
+      GRANT EXECUTE ON FUNCTION main.security.region_filter TO `governance-team`;
+
+      -- Step 3: Create the ABAC policy on the schema
+      CREATE POLICY hide_cross_region_rows
+      ON SCHEMA main.sales
+      COMMENT 'Restrict rows to users in the matching regional group'
+      ROW FILTER main.security.region_filter
+      TO `account users`
+      EXCEPT `data-admins`
+      FOR TABLES
+      WHEN has_tag_value('sensitivity', 'high')
+      MATCH COLUMNS has_tag('geo_region') AS region
+      USING COLUMNS (region);
+      ```
+
+      The policy applies to every table in `main.sales` tagged `sensitivity=high` that has a
+      column tagged `geo_region`. New tables matching those tags are covered automatically.
+
+      End users querying protected tables do **not** need EXECUTE on the UDF — Unity Catalog
+      evaluates the policy on their behalf.
+  expectations:
+    expected_facts:
+      - "ABAC row filter policies attach to a schema or catalog, not individual tables"
+      - "New tables matching the tag conditions are automatically covered"
+      - "WHEN clause uses has_tag_value() to match tables by tag"
+      - "MATCH COLUMNS identifies which column to pass to the UDF by tag condition"
+      - "EXCEPT clause exempts specific principals from the policy"
+      - "Only the policy creator needs EXECUTE on the UDF, not querying end users"
+    expected_patterns:
+      - pattern: "CREATE POLICY"
+        min_count: 1
+        description: "Creates an ABAC policy"
+      - pattern: "ROW FILTER"
+        min_count: 1
+        description: "Row filter policy type"
+      - pattern: "has_tag_value\\("
+        min_count: 1
+        description: "Tag-based table condition"
+      - pattern: "MATCH COLUMNS"
+        min_count: 1
+        description: "Column matching by tag"
+      - pattern: "EXCEPT"
+        min_count: 1
+        description: "Principal exemption"
+      - pattern: "GRANT EXECUTE"
+        min_count: 1
+        description: "EXECUTE grant for policy creator"
+    guidelines:
+      - "Must show CREATE POLICY with ROW FILTER, TO, EXCEPT, WHEN, and MATCH COLUMNS"
+      - "Must clarify that EXECUTE is needed by the creator only, not end users"
+      - "Must explain that the policy covers all matching tables automatically"
+  metadata:
+    category: happy_path
+    difficulty: medium
+
+- id: uc_abac_column_mask_policy_009
+  inputs:
+    prompt: "How do I mask SSN columns across an entire schema using an ABAC column mask policy?"
+  outputs:
+    response: |
+      Create a column mask ABAC policy that targets all columns tagged `pii=ssn` across the schema.
+      A single policy covers every table — including new ones added in the future.
+
+      ```sql
+      -- Step 1: Create the mask UDF
+      CREATE OR REPLACE FUNCTION main.security.mask_ssn(ssn STRING, show_last INT)
+      RETURNS STRING
+      DETERMINISTIC
+      RETURN CONCAT('***-**-', RIGHT(ssn, show_last));
+
+      -- Step 2: Grant EXECUTE to the policy creator
+      GRANT EXECUTE ON FUNCTION main.security.mask_ssn TO `governance-team`;
+
+      -- Step 3: Tag the SSN columns
+      ALTER TABLE main.hr.employees
+      ALTER COLUMN ssn SET TAGS ('pii' = 'ssn');
+
+      -- Step 4: Create the column mask policy
+      CREATE POLICY mask_ssn_columns
+      ON SCHEMA main.hr
+      COMMENT 'Mask SSN columns for non-privileged users'
+      COLUMN MASK main.security.mask_ssn
+      TO `account users`
+      EXCEPT `pii-readers`, `data-admins`
+      FOR TABLES
+      MATCH COLUMNS has_tag_value('pii', 'ssn') AS ssn_col
+      ON COLUMN ssn_col
+      USING COLUMNS (4);
+      ```
+
+      Members of `pii-readers` and `data-admins` see the full SSN; everyone else sees `***-**-XXXX`.
+  expectations:
+    expected_facts:
+      - "COLUMN MASK policy type targets columns identified by tag conditions"
+      - "MATCH COLUMNS has_tag_value() identifies which columns to mask"
+      - "ON COLUMN specifies which matched column alias to apply the mask to"
+      - "USING COLUMNS passes additional arguments to the mask UDF"
+      - "EXCEPT exempts privileged groups from the mask"
+      - "Only the policy creator needs EXECUTE on the mask UDF"
+    expected_patterns:
+      - pattern: "CREATE POLICY"
+        min_count: 1
+        description: "Creates an ABAC policy"
+      - pattern: "COLUMN MASK"
+        min_count: 1
+        description: "Column mask policy type"
+      - pattern: "has_tag_value\\('pii'"
+        min_count: 1
+        description: "Tags SSN columns by pii value"
+      - pattern: "ON COLUMN"
+        min_count: 1
+        description: "Specifies which column alias to mask"
+      - pattern: "EXCEPT"
+        min_count: 1
+        description: "Exempts privileged users"
+    guidelines:
+      - "Must show CREATE POLICY with COLUMN MASK, MATCH COLUMNS, ON COLUMN, and USING COLUMNS"
+      - "Must show tagging columns before creating the policy"
+      - "Must clarify who is exempt and why"
+  metadata:
+    category: happy_path
+    difficulty: medium
+
+- id: uc_abac_show_effective_policies_010
+  inputs:
+    prompt: "How do I check which ABAC policies are active on a table in Unity Catalog?"
+  outputs:
+    response: |
+      Use `SHOW EFFECTIVE POLICIES` to see all policies that apply to a table, including those
+      inherited from the parent schema or catalog:
+
+      ```sql
+      -- All effective policies on a specific table (includes inherited)
+      SHOW EFFECTIVE POLICIES ON TABLE main.hr.employees;
+
+      -- All policies defined directly on the schema
+      SHOW POLICIES ON SCHEMA main.hr;
+
+      -- Describe a specific policy
+      DESCRIBE POLICY mask_ssn_columns ON SCHEMA main.hr;
+      ```
+
+      Using the Python SDK:
+
+      ```python
+      from databricks.sdk import WorkspaceClient
+
+      w = WorkspaceClient()
+
+      for policy in w.policies.list_effective_policies(
+          on_securable_type="TABLE",
+          on_securable_fullname="main.hr.employees",
+      ):
+          print(f"{policy.name} from {policy.on_securable_fullname} — {policy.policy_type}")
+      ```
+
+      `SHOW EFFECTIVE POLICIES` returns policies from the table, its schema, and its catalog —
+      giving a complete picture of what security is applied at query time.
+  expectations:
+    expected_facts:
+      - "SHOW EFFECTIVE POLICIES returns policies inherited from parent schema and catalog"
+      - "SHOW POLICIES returns only policies defined directly on the securable"
+      - "DESCRIBE POLICY shows the full definition of a specific policy"
+      - "list_effective_policies() is the Python SDK equivalent of SHOW EFFECTIVE POLICIES"
+    expected_patterns:
+      - pattern: "SHOW EFFECTIVE POLICIES ON TABLE"
+        min_count: 1
+        description: "Shows effective policies on a table"
+      - pattern: "SHOW POLICIES ON SCHEMA"
+        min_count: 1
+        description: "Shows policies on a schema"
+      - pattern: "DESCRIBE POLICY"
+        min_count: 1
+        description: "Describes a policy"
+      - pattern: "list_effective_policies"
+        min_count: 1
+        description: "Python SDK method"
+    guidelines:
+      - "Must distinguish SHOW EFFECTIVE POLICIES (inherited) from SHOW POLICIES (direct only)"
+      - "Must show both SQL and Python SDK approaches"
+  metadata:
+    category: happy_path
+    difficulty: easy
+
+- id: uc_abac_sdk_create_policy_011
+  inputs:
+    prompt: "How do I create an ABAC column mask policy using the Databricks Python SDK?"
+  outputs:
+    response: |
+      Use `w.policies.create_policy()` with `PolicyInfo`:
+
+      ```python
+      from databricks.sdk import WorkspaceClient
+      from databricks.sdk.service.catalog import (
+          ColumnMaskOptions,
+          FunctionArgument,
+          MatchColumn,
+          PolicyInfo,
+          PolicyType,
+          SecurableType,
+      )
+
+      w = WorkspaceClient()
+
+      w.policies.create_policy(
+          PolicyInfo(
+              name="mask_ssn_columns",
+              comment="Mask SSN columns for non-privileged users",
+              on_securable_type=SecurableType.SCHEMA,
+              on_securable_fullname="main.hr",
+              for_securable_type=SecurableType.TABLE,
+              policy_type=PolicyType.POLICY_TYPE_COLUMN_MASK,
+              to_principals=["account users"],
+              except_principals=["pii-readers", "data-admins"],
+              match_columns=[
+                  MatchColumn(condition="has_tag_value('pii', 'ssn')", alias="ssn_col"),
+              ],
+              column_mask=ColumnMaskOptions(
+                  function_name="main.security.mask_ssn",
+                  on_column="ssn_col",
+                  using=[FunctionArgument(constant="4")],
+              ),
+          )
+      )
+      ```
+
+      For a row filter policy, use `policy_type=PolicyType.POLICY_TYPE_ROW_FILTER` and
+      `row_filter=RowFilterOptions(...)` instead of `column_mask`.
+  expectations:
+    expected_facts:
+      - "w.policies.create_policy() accepts a PolicyInfo object"
+      - "PolicyType.POLICY_TYPE_COLUMN_MASK is used for column masks"
+      - "PolicyType.POLICY_TYPE_ROW_FILTER is used for row filters"
+      - "MatchColumn maps a tag condition to an alias used as a UDF argument"
+      - "ColumnMaskOptions specifies the mask function, target column, and UDF arguments"
+      - "except_principals lists groups exempt from the policy"
+      - "SecurableType.SCHEMA targets the policy at schema level"
+    expected_patterns:
+      - pattern: "from databricks\\.sdk\\.service\\.catalog import"
+        min_count: 1
+        description: "Correct SDK import path"
+      - pattern: "w\\.policies\\.create_policy"
+        min_count: 1
+        description: "SDK method to create policy"
+      - pattern: "PolicyInfo"
+        min_count: 1
+        description: "PolicyInfo class"
+      - pattern: "PolicyType\\.POLICY_TYPE_COLUMN_MASK"
+        min_count: 1
+        description: "Column mask policy type constant"
+      - pattern: "MatchColumn"
+        min_count: 1
+        description: "MatchColumn for tag-based column selection"
+      - pattern: "ColumnMaskOptions"
+        min_count: 1
+        description: "Column mask configuration"
+    guidelines:
+      - "Must show all required imports from databricks.sdk.service.catalog"
+      - "Must use correct class names: PolicyInfo, PolicyType, MatchColumn, ColumnMaskOptions"
+      - "Must mention the row filter equivalent (RowFilterOptions)"
+  metadata:
+    category: happy_path
+    difficulty: medium
+
+- id: uc_traditional_row_filter_012
+  inputs:
+    prompt: "How do I add a row filter to a single Unity Catalog table so each user only sees their own rows?"
+  outputs:
+    response: |
+      Use `ALTER TABLE SET ROW FILTER` to attach a filter UDF directly to a table:
+
+      ```sql
+      -- Step 1: Create the filter UDF using current_user()
+      CREATE OR REPLACE FUNCTION main.hr.owner_filter(owner_email STRING)
+      RETURNS BOOLEAN
+      RETURN is_account_group_member('hr-admins') OR owner_email = current_user();
+
+      -- Step 2: Grant EXECUTE to the person running the ALTER TABLE
+      GRANT EXECUTE ON FUNCTION main.hr.owner_filter TO `hr-admin`;
+
+      -- Step 3: Attach the filter to the table
+      ALTER TABLE main.hr.employee_records
+      SET ROW FILTER main.hr.owner_filter ON (owner_email);
+      ```
+
+      To remove:
+      ```sql
+      ALTER TABLE main.hr.employee_records DROP ROW FILTER;
+      ```
+
+      **Key points:**
+      - `current_user()` returns the email of the session user — use for per-row ownership patterns
+      - Only the person running `ALTER TABLE SET ROW FILTER` needs `EXECUTE` on the UDF;
+        querying end users do not
+      - This configures the filter on this table only — use ABAC policies for schema-wide coverage
+  expectations:
+    expected_facts:
+      - "ALTER TABLE SET ROW FILTER attaches a filter UDF to a single table"
+      - "The UDF must return BOOLEAN"
+      - "current_user() returns the email of the session user"
+      - "is_account_group_member() checks group membership"
+      - "Only the person running ALTER TABLE needs EXECUTE on the UDF, not querying end users"
+      - "ALTER TABLE DROP ROW FILTER removes the filter"
+      - "Traditional row filters apply per table, unlike ABAC policies which cover a schema"
+    expected_patterns:
+      - pattern: "ALTER TABLE.*SET ROW FILTER"
+        min_count: 1
+        description: "Attaches row filter to table"
+      - pattern: "RETURNS BOOLEAN"
+        min_count: 1
+        description: "Filter UDF must return BOOLEAN"
+      - pattern: "current_user\\(\\)"
+        min_count: 1
+        description: "Current user identity function"
+      - pattern: "GRANT EXECUTE"
+        min_count: 1
+        description: "EXECUTE grant for the creator"
+      - pattern: "DROP ROW FILTER"
+        min_count: 1
+        description: "Shows how to remove the filter"
+    guidelines:
+      - "Must clarify EXECUTE is needed by the ALTER TABLE executor only, not end users"
+      - "Must show both SET and DROP ROW FILTER"
+      - "Must note this is per-table, unlike schema-wide ABAC policies"
+  metadata:
+    category: happy_path
+    difficulty: medium
+
+- id: uc_traditional_column_mask_013
+  inputs:
+    prompt: "How do I mask a credit card number column in a Unity Catalog table so only the last 4 digits are visible?"
+  outputs:
+    response: |
+      Use `ALTER TABLE ALTER COLUMN SET MASK` to attach a mask UDF to a specific column:
+
+      ```sql
+      -- Step 1: Create the mask UDF
+      CREATE OR REPLACE FUNCTION main.finance.mask_ccn(ccn STRING)
+      RETURNS STRING
+      RETURN CASE
+        WHEN is_account_group_member('finance-auditors') THEN ccn
+        ELSE CONCAT('****-****-****-', RIGHT(ccn, 4))
+      END;
+
+      -- Step 2: Grant EXECUTE to the person running the ALTER TABLE
+      GRANT EXECUTE ON FUNCTION main.finance.mask_ccn TO `finance-admin`;
+
+      -- Step 3: Attach the mask to the column
+      ALTER TABLE main.finance.transactions
+      ALTER COLUMN credit_card_number SET MASK main.finance.mask_ccn;
+      ```
+
+      To remove:
+      ```sql
+      ALTER TABLE main.finance.transactions
+      ALTER COLUMN credit_card_number DROP MASK;
+      ```
+
+      Members of `finance-auditors` see the full number; everyone else sees `****-****-****-XXXX`.
+      Only the person running `ALTER TABLE` needs `EXECUTE` on the mask UDF — not the querying users.
+  expectations:
+    expected_facts:
+      - "ALTER TABLE ALTER COLUMN SET MASK attaches a mask UDF to a specific column"
+      - "The mask UDF receives the original column value as its first argument"
+      - "is_account_group_member() grants privileged users the unmasked value"
+      - "Only the person running ALTER TABLE needs EXECUTE on the UDF, not end users"
+      - "ALTER COLUMN DROP MASK removes the mask"
+    expected_patterns:
+      - pattern: "ALTER TABLE.*ALTER COLUMN.*SET MASK"
+        min_count: 1
+        description: "Attaches column mask"
+      - pattern: "is_account_group_member\\("
+        min_count: 1
+        description: "Group membership check"
+      - pattern: "GRANT EXECUTE"
+        min_count: 1
+        description: "EXECUTE grant for creator"
+      - pattern: "DROP MASK"
+        min_count: 1
+        description: "Shows how to remove the mask"
+      - pattern: "RIGHT\\("
+        min_count: 1
+        description: "Shows last-N-digits masking pattern"
+    guidelines:
+      - "Must clarify EXECUTE is needed by the ALTER TABLE executor only, not querying users"
+      - "Must show both SET MASK and DROP MASK"
+      - "Must demonstrate a realistic partial-reveal masking pattern"
+  metadata:
+    category: happy_path
+    difficulty: medium
+
+- id: uc_execute_privilege_rule_014
+  inputs:
+    prompt: "Do end users need EXECUTE permission on the UDF to query a table protected by an ABAC policy or row filter?"
+  outputs:
+    response: |
+      No. End users querying a protected table do **not** need `EXECUTE` on the UDF.
+
+      Only the identity that **creates or attaches** the security object needs `EXECUTE`:
+
+      | Security Mechanism | Who needs EXECUTE |
+      |---|---|
+      | `CREATE POLICY` (ABAC) | The identity running `CREATE POLICY` |
+      | `ALTER TABLE SET ROW FILTER` | The identity running the `ALTER TABLE` statement |
+      | `ALTER TABLE ALTER COLUMN SET MASK` | The identity running the `ALTER TABLE` statement |
+
+      Unity Catalog evaluates the UDF on behalf of the querying user at query time — the user never
+      calls the function directly.
+
+      ```sql
+      -- Grant EXECUTE to the governance/policy team only
+      GRANT EXECUTE ON FUNCTION main.security.mask_ssn TO `governance-team`;
+      ```
+
+      Do **not** grant `EXECUTE` to `account users` or any broad group. Doing so gives users a path
+      to call the UDF directly outside of a policy context.
+  expectations:
+    expected_facts:
+      - "End users querying ABAC-protected tables do not need EXECUTE on the UDF"
+      - "Only the identity running CREATE POLICY needs EXECUTE for ABAC policies"
+      - "Only the identity running ALTER TABLE SET ROW FILTER needs EXECUTE for row filters"
+      - "Only the identity running ALTER TABLE ALTER COLUMN SET MASK needs EXECUTE for column masks"
+      - "Unity Catalog evaluates the UDF on behalf of the querying user"
+    expected_patterns:
+      - pattern: "GRANT EXECUTE"
+        min_count: 1
+        description: "Shows correct EXECUTE grant"
+      - pattern: "CREATE POLICY|SET ROW FILTER|SET MASK"
+        min_count: 1
+        description: "References the security mechanism"
+    guidelines:
+      - "Must clearly state end users do NOT need EXECUTE"
+      - "Must cover all three mechanisms: ABAC CREATE POLICY, SET ROW FILTER, SET MASK"
+      - "Must explain why granting EXECUTE broadly is a bad practice"
+  metadata:
+    category: edge_case
+    difficulty: medium
+
+- id: uc_dynamic_view_row_security_015
+  inputs:
+    prompt: "How do I create a dynamic view in Unity Catalog for row-level security where managers see all rows and others see only rows under $1M?"
+  outputs:
+    response: |
+      Create a view that uses `is_account_group_member()` in a `CASE` expression in the `WHERE` clause:
+
+      ```sql
+      CREATE OR REPLACE VIEW main.sales.orders_secure AS
+      SELECT
+        order_id,
+        customer_id,
+        region,
+        product,
+        total
+      FROM main.sales.orders
+      WHERE
+        CASE
+          WHEN is_account_group_member('managers') THEN TRUE
+          ELSE total <= 1000000
+        END;
+      ```
+
+      Grant access to the **view only** — never to the base table directly:
+
+      ```sql
+      GRANT USE CATALOG ON CATALOG main TO `analysts`;
+      GRANT USE SCHEMA ON SCHEMA main.sales TO `analysts`;
+      GRANT SELECT ON VIEW main.sales.orders_secure TO `analysts`;
+      -- Do NOT grant SELECT on main.sales.orders to analysts
+      ```
+
+      Use `is_account_group_member()` (account-level group) rather than `is_member()` (workspace-level).
+      Direct grants to the base table bypass the view's security logic entirely.
+  expectations:
+    expected_facts:
+      - "Dynamic views use CASE expressions with is_account_group_member() in the WHERE clause"
+      - "is_account_group_member() checks account-level group membership and is preferred over is_member()"
+      - "Users must be granted access to the view only, never to the base table"
+      - "Granting SELECT on the base table bypasses the view's security logic"
+      - "is_member() is workspace-level and not recommended for Unity Catalog"
+    expected_patterns:
+      - pattern: "CREATE OR REPLACE VIEW"
+        min_count: 1
+        description: "Creates the dynamic view"
+      - pattern: "is_account_group_member\\("
+        min_count: 1
+        description: "Account-level group membership check"
+      - pattern: "CASE.*WHEN.*THEN TRUE"
+        min_count: 1
+        description: "CASE-based row filter pattern"
+      - pattern: "GRANT SELECT ON VIEW"
+        min_count: 1
+        description: "Grants access to view, not table"
+    guidelines:
+      - "Must use is_account_group_member() not is_member()"
+      - "Must explicitly warn NOT to grant SELECT on the base table"
+      - "Must show the complete GRANT sequence (USE CATALOG, USE SCHEMA, SELECT on VIEW)"
+  metadata:
+    category: happy_path
+    difficulty: easy
+
+- id: uc_dynamic_view_to_abac_migration_016
+  inputs:
+    prompt: "My team is using dynamic views for column masking in Unity Catalog. How do we migrate to ABAC policies?"
+  outputs:
+    response: |
+      Migration from dynamic views to ABAC replaces embedded CASE logic with a governed tag +
+      policy + UDF pattern. The key trade-off: consumers must update their queries from the view
+      name to the base table name.
+
+      **High-level process:**
+
+      1. **Inventory dynamic views** — find views containing security logic:
+         ```python
+         from databricks.sdk import WorkspaceClient
+         w = WorkspaceClient()
+         result = w.statement_execution.execute_statement(
+             warehouse_id="<warehouse-id>",
+             statement="""
+               SELECT table_catalog, table_schema, table_name, view_definition
+               FROM system.information_schema.views
+               WHERE table_catalog = '<catalog>'
+                 AND (
+                   view_definition LIKE '%is_account_group_member%'
+                   OR view_definition LIKE '%session_user%'
+                 )
+             """,
+         )
+         ```
+
+      2. **Create governed tags** matching the view's CASE conditions
+      3. **Apply tags** to base table columns
+      4. **Create ABAC UDFs** that mirror the CASE logic from the view
+      5. **Create ABAC policies** on the schema using `CREATE POLICY ... COLUMN MASK`
+      6. **Grant users direct SELECT** on the base table (ABAC enforces security)
+      7. **Validate parity** — run `SHOW EFFECTIVE POLICIES` and compare results
+      8. **Update application references** from view name to base table name
+      9. **Drop the security view** — `DROP VIEW IF EXISTS main.sales.orders_secure`
+
+      **Key constraints:**
+      - Multi-table JOIN views cannot be fully migrated — keep the view for the JOIN shape, move
+        security predicates to ABAC on base tables
+      - Applications must change object names — this is the most disruptive part
+      - Run views and ABAC in parallel during transition to validate parity before dropping
+  expectations:
+    expected_facts:
+      - "Migration requires updating application references from view name to base table name"
+      - "Inventory dynamic views using system.information_schema.views"
+      - "Multi-table JOIN views cannot be fully migrated to ABAC"
+      - "Governed tags must be created and applied before ABAC policies can use them"
+      - "SHOW EFFECTIVE POLICIES validates the ABAC policy is active before dropping the view"
+      - "Views and ABAC policies should run in parallel during the transition for validation"
+    expected_patterns:
+      - pattern: "system\\.information_schema\\.views"
+        min_count: 1
+        description: "Queries view definitions to find security views"
+      - pattern: "is_account_group_member|session_user"
+        min_count: 1
+        description: "Identifies dynamic view security patterns"
+      - pattern: "CREATE POLICY|COLUMN MASK|ROW FILTER"
+        min_count: 1
+        description: "ABAC policy creation"
+      - pattern: "DROP VIEW"
+        min_count: 1
+        description: "Final step: drop the old view"
+      - pattern: "SHOW EFFECTIVE POLICIES"
+        min_count: 1
+        description: "Validation step"
+    guidelines:
+      - "Must mention that application query references must change (view → base table)"
+      - "Must cover the validation step before dropping the view"
+      - "Must note that multi-table JOIN views cannot be fully migrated"
+      - "Must show the inventory query using system.information_schema.views"
+  metadata:
+    category: happy_path
+    difficulty: hard
+
+- id: uc_data_classification_query_017
+  inputs:
+    prompt: "How do I find which columns Unity Catalog Data Classification has identified as PII?"
+  outputs:
+    response: |
+      Query `system.data_classification.results` for high-confidence detections:
+
+      ```python
+      from databricks.sdk import WorkspaceClient
+
+      w = WorkspaceClient()
+      WAREHOUSE_ID = "<warehouse-id>"
+
+      result = w.statement_execution.execute_statement(
+          warehouse_id=WAREHOUSE_ID,
+          statement="""
+              SELECT
+                catalog_name,
+                schema_name,
+                table_name,
+                column_name,
+                class_name,
+                score,
+                scan_timestamp
+              FROM system.data_classification.results
+              WHERE catalog_name = '<catalog>'
+                AND score >= 0.8
+              ORDER BY schema_name, table_name, column_name, score DESC
+          """,
+      )
+      ```
+
+      Common `class_name` values:
+      - `class.us_ssn`, `class.email_address`, `class.phone_number`, `class.credit_card`
+      - `class.date_of_birth`, `class.name`, `class.ip_address`
+
+      Use `score >= 0.8` as the threshold for high-confidence results. Classification runs as a
+      background job — new tables are scanned within 24 hours of being added. Views are not
+      supported; classify the underlying base tables instead.
+  expectations:
+    expected_facts:
+      - "Classification results are stored in system.data_classification.results"
+      - "score >= 0.8 is the recommended threshold for high-confidence detections"
+      - "class_name values follow the class.* naming convention (e.g., class.us_ssn)"
+      - "Classification runs in the background and new tables are scanned within 24 hours"
+      - "Views are not supported — classify base tables instead"
+    expected_patterns:
+      - pattern: "system\\.data_classification\\.results"
+        min_count: 1
+        description: "Queries the classification results table"
+      - pattern: "score >= 0\\.8"
+        min_count: 1
+        description: "High-confidence threshold"
+      - pattern: "class_name"
+        min_count: 1
+        description: "Classification tag name column"
+      - pattern: "class\\.us_ssn|class\\.email_address|class\\.credit_card"
+        min_count: 1
+        description: "Example class.* tag names"
+    guidelines:
+      - "Must query system.data_classification.results"
+      - "Must explain the score threshold"
+      - "Must list common class.* tag names"
+      - "Must note that views are not supported"
+  metadata:
+    category: happy_path
+    difficulty: easy
+
+- id: uc_abac_traditional_migration_018
+  inputs:
+    prompt: "We have row filters and column masks set on individual tables. How do we migrate them to ABAC policies?"
+  outputs:
+    response: |
+      Migration from per-table traditional filters to ABAC policies replaces manual per-table
+      configuration with tag-driven schema-wide policies.
+
+      **Step 1: Audit existing filters and masks**
+
+      ```sql
+      -- Find all tables with row filters in the catalog
+      SELECT table_catalog, table_schema, table_name, row_filter_function_name
+      FROM system.information_schema.row_filters
+      WHERE table_catalog = '<catalog>';
+
+      -- Find all columns with masks
+      SELECT table_catalog, table_schema, table_name, column_name, mask_function_name
+      FROM system.information_schema.column_masks
+      WHERE table_catalog = '<catalog>';
+      ```
+
+      **Step 2: Create governed tags** matching the UDF logic patterns
+
+      **Step 3: Apply tags** to the tables and columns covered by the filters
+
+      **Step 4: Create ABAC policies** that replicate the UDF logic using `MATCH COLUMNS has_tag(...)`
+
+      **Step 5: Validate** using `SHOW EFFECTIVE POLICIES` and parallel testing
+
+      **Step 6: Remove the old per-table filters**
+
+      ```sql
+      ALTER TABLE main.hr.employees DROP ROW FILTER;
+      ALTER TABLE main.hr.employees ALTER COLUMN ssn DROP MASK;
+      ```
+
+      **Key benefit:** After migration, new tables tagged correctly are automatically covered
+      without any additional `ALTER TABLE` commands.
+  expectations:
+    expected_facts:
+      - "system.information_schema.row_filters lists all tables with row filters"
+      - "system.information_schema.column_masks lists all columns with masks"
+      - "Migration involves creating governed tags and ABAC policies to replace per-table filters"
+      - "ALTER TABLE DROP ROW FILTER removes a traditional row filter"
+      - "ALTER COLUMN DROP MASK removes a traditional column mask"
+      - "ABAC policies automatically cover new tables matching the tag conditions"
+    expected_patterns:
+      - pattern: "system\\.information_schema\\.row_filters"
+        min_count: 1
+        description: "Audits existing row filters"
+      - pattern: "system\\.information_schema\\.column_masks"
+        min_count: 1
+        description: "Audits existing column masks"
+      - pattern: "DROP ROW FILTER"
+        min_count: 1
+        description: "Removes old row filter"
+      - pattern: "DROP MASK"
+        min_count: 1
+        description: "Removes old column mask"
+      - pattern: "SHOW EFFECTIVE POLICIES"
+        min_count: 1
+        description: "Validation step"
+    guidelines:
+      - "Must show audit queries against information_schema.row_filters and column_masks"
+      - "Must show how to remove old filters/masks"
+      - "Must explain the key benefit: automatic coverage of new tables with ABAC"
+  metadata:
+    category: happy_path
+    difficulty: hard
